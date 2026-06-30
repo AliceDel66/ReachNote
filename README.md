@@ -20,7 +20,7 @@
 > ReachNote is a **cross-platform (macOS / Windows) desktop AI capture tool**. While browsing GitHub, the web, videos, or RSS, you grab a link with one shortcut — a local agent reads the content, runs an AI analysis, and writes a structured card into your bound Notion database, building a personal research library that stays searchable and comparable over time.
 
 > [!NOTE]
-> **Status: early development (Pre-Alpha).** Product scope, information architecture and tech stack are settled; core code is in progress. The P0 vertical slice already runs (URL → AI analysis → structured card). Sections marked *planned / in progress* describe the target shape and are not fully implemented yet.
+> **Status: PRD reset (Pre-Alpha).** On 2026-06-30 the previous implementation progress was cleared at the user's request. This README now describes product intent and historical direction only; the current source of truth for the next implementation is [`plans/prds/20260630-1906-reachnote-mvp-reset.prd.md`](plans/prds/20260630-1906-reachnote-mvp-reset.prd.md).
 
 ---
 
@@ -238,7 +238,7 @@ The stack is settled — decided jointly by three constraints: cross-platform, a
 | App shell | **Tauri 2** (cross-platform macOS / Windows) |
 | Frontend | **React 18** + TypeScript + Vite |
 | UI components | **HeroUI** + Tailwind CSS |
-| Core backend | **Rust** (`reachnote-core`, unit-tested) |
+| Core backend | **Rust** (`reachnote-core`, to be rebuilt) |
 | Persistence | SQLite |
 | Credential storage | OS keychain (keyring) |
 | Distribution | Tauri bundler → `.dmg` / `.msi` |
@@ -247,16 +247,18 @@ The stack is settled — decided jointly by three constraints: cross-platform, a
 
 ---
 
-## Project Structure
+## Target Project Structure
+
+The implementation was cleared on 2026-06-30. This is the target structure to recreate after PRD approval.
 
 ```text
 rearchnote/
-├─ crates/core/        # reachnote-core: pure-logic core (Rust, unit-tested)
+├─ crates/core/        # reachnote-core: pure-logic core (Rust, unit-tested after rebuild)
 │  └─ src/
 │     ├─ ai/           # AI provider abstraction: claude-cli / codex-cli / openai-api + parsing
 │     └─ reach.rs      # wraps calls to the Agent-Reach CLI
 ├─ src-tauri/          # Tauri shell: capture command, tray, persistence
-├─ src/                # React + HeroUI frontend (minimal capture UI)
+├─ src/                # React + HeroUI frontend (queue-first desktop UI)
 ├─ Cargo.toml          # Rust workspace
 └─ package.json        # frontend deps + Tauri CLI
 ```
@@ -266,7 +268,7 @@ rearchnote/
 ## Getting Started
 
 > [!IMPORTANT]
-> Early stage. The **P0 vertical slice** runs today: enter a URL (or paste content directly) → call an AI provider → get a structured card. Notion writing, tray and queue persistence are still in progress.
+> PRD reset stage. The previous runnable implementation has been cleared. There is currently no app scaffold to run; rebuild should start from [`plans/prds/20260630-1906-reachnote-mvp-reset.prd.md`](plans/prds/20260630-1906-reachnote-mvp-reset.prd.md).
 
 ### Prerequisites
 
@@ -276,6 +278,8 @@ rearchnote/
 - A Notion account (for writing; in progress)
 
 ### Run
+
+After the PRD is approved and the Tauri/React/Rust scaffold is recreated, the target commands are:
 
 ```bash
 git clone git@github.com:AliceDel66/ReachNote.git

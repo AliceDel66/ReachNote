@@ -17,12 +17,44 @@
 
 1. 用户当前明确请求。
 2. 本文件和 repo-local docs。
-3. 产品边界：`docs/discussions/mvp-prd-information-architecture.md`。
-4. 技术选型：`docs/adr/0001-tech-stack.md`。
-5. 当前代码：`src/`、`src-tauri/`、`crates/core/`。
-6. `README.md` / `README.zh-CN.md`。
+3. 当前开发记忆：`memory/README.md` 与 `memory/*-progress.md`。
+4. UI 设计源：`memory/design-source.md` 中登记的用户提供设计图、截图、Figma 导出或设计说明。
+5. 产品边界：`docs/discussions/mvp-prd-information-architecture.md`。
+6. 技术选型：`docs/adr/0001-tech-stack.md`。
+7. 当前代码：`src/`、`src-tauri/`、`crates/core/`。
+8. `README.md` / `README.zh-CN.md`。
 
 注意：README 中有 planned / in progress 内容。声称功能已实现前，必须回到代码或运行结果验证。
+
+## Memory Protocol
+
+为了避免长开发周期后产生幻觉，任何 agent 开始非平凡任务前必须先读：
+
+- `memory/README.md`
+- 与任务相关的 `memory/frontend-progress.md`、`memory/backend-progress.md`、`memory/integration-progress.md`
+- 涉及 UI 时必须读 `memory/design-source.md`
+
+每完成一个可验证开发切片，必须在同一轮更新相关 memory 文件，至少记录：
+
+- 当前状态：Done / In Progress / Blocked / Planned。
+- 实际改动文件。
+- 已验证命令或人工检查结果。
+- 未闭环风险、阻塞和下一步入口。
+- 日期使用 `YYYY-MM-DD`。
+
+Memory 文件只记录事实和可追踪决策，不记录猜测、完整私密正文、真实 token、API key、Cookie、个人账号信息或未验证的外部状态。
+
+如果 memory 与代码冲突，以当前代码和验证结果为准，并立即修正 memory。
+
+## Design Fidelity Protocol
+
+后续用户提供前端 UI 设计图后，设计图是前端实现的强约束，不允许自行重设计。
+
+- 先把设计来源登记到 `memory/design-source.md`，包括文件路径、日期、覆盖页面、视口尺寸和开放问题。
+- 实现前先拆解视觉规格：布局、间距、字号、颜色、圆角、阴影、图标、状态、响应式规则。
+- 前端实现必须优先匹配设计图，再考虑代码便利性。
+- 与设计图不一致的地方必须在 `memory/design-source.md` 写明原因和用户确认状态。
+- 用户可见 UI 改动必须实际渲染验证，检查桌面和窄屏、console error、文字溢出、重叠、断图和关键交互状态。
 
 ## Product Boundary
 
@@ -120,10 +152,13 @@ src/App.tsx handleCapture
 ## UI And Product Quality
 
 - UI 是工具型桌面产品：密度清晰、层级克制、适合反复处理队列和失败重试。
+- 最终呈现形态是桌面导航栏 / 菜单栏常驻应用，不是网页应用；所有用户可见功能必须以 Tauri 桌面运行结果为准。
 - 优先复用 HeroUI + Tailwind 现有风格。不要引入新 UI 框架、设计语言或装饰型 landing page，除非任务明确要求。
 - 常用页面要覆盖 loading、empty、success、error、disabled、retry 等状态。
 - 前端文字不能溢出按钮、卡片、表格或窄屏容器。
-- 浏览器或 Tauri 可见体验变更，需要实际渲染检查；仅静态读代码不算完成。
+- 桌面可见体验变更，需要实际运行 Tauri app 并检查真实窗口 / 菜单栏 / 托盘 / 系统权限表现；仅静态读代码、headless、Vite 网页或截图不算完成。
+- 每个用户可见功能开发完成后，必须主动调用 `@电脑`（`plugin://computer-use@openai-bundled`）直接控制本机桌面应用完成交互验证；浏览器/Vite 只能作为开发期辅助验证，不能作为最终 PASS 依据。
+- 通过 Computer Use 操作本机 UI 时，若下一步会安装软件、创建/授权账号、上传文件、改权限、删除数据、写入第三方服务或传输敏感数据，必须按 `computer-use` 技能要求在动作发生前向用户确认。
 
 ## Verification
 
@@ -131,26 +166,65 @@ src/App.tsx handleCapture
 
 - 前端类型检查：`pnpm typecheck`。
 - 前端构建：`pnpm build`。
-- 前端本地预览：`pnpm dev`。
-- Tauri 开发运行：`pnpm tauri dev`。
+- 前端本地预览：`pnpm dev`，仅作辅助 UI 调试，不作为最终验收。
+- Tauri 开发运行：`pnpm tauri dev`，可作桌面 runtime 预检。
+- 桌面安装/发布验证：使用 Tauri bundler 产物或已安装 app；最终验收必须测试安装后的桌面结果。
 - Rust core 测试：`cargo test -p reachnote-core`。
 - Rust core 快速检查：`cargo check -p reachnote-core`。
 - Tauri crate 检查：`cargo check --manifest-path src-tauri/Cargo.toml`。
+- 桌面真实验证：`@电脑`（`plugin://computer-use@openai-bundled`）操作本机 Tauri app / 已安装 app，检查菜单栏/托盘入口、窗口打开关闭、tab/导航、表单输入、快捷入口、错误态、文本溢出、重叠、断图和系统级权限/弹窗。
 
 规则：
 
 - 只改 docs 可不跑全量构建，但要至少检查文件存在、链接/命令没有明显错写。
 - 改 `crates/core/` 必须跑 `cargo test -p reachnote-core`。
-- 改 `src/` 必须跑 `pnpm typecheck`；用户可见 UI 改动还要实际渲染。
-- 改 `src-tauri/` 必须跑对应 Cargo check；涉及 command 契约还要跑前端 typecheck。
+- 改 `src/` 必须跑 `pnpm typecheck`；用户可见 UI 改动还要用 `@电脑` 在 Tauri 桌面 app 中验证。
+- 改 `src-tauri/` 必须跑对应 Cargo check；涉及 command 契约还要跑前端 typecheck，并用 `@电脑` 验证桌面 runtime 行为。
 - 改 external adapters、secrets、queue、Notion sync 时，要补针对失败路径的测试或可重复验证命令。
+- 任一用户可见功能切片完成后，必须在进入 Claude review gate 前完成 `@电脑` 桌面验证，并把 app 形态（`pnpm tauri dev` / 已安装 app / 打包产物）、操作路径、截图/观察结果、系统弹窗、权限状态和失败信息写入相关 `memory/*-progress.md` 或 `desktop-qa.md`。如果 Computer Use 不可用，必须把该状态标为 Blocked，而不是当作验证通过。
+- 如果只能完成浏览器/Vite 验证，结果只能标为 Preliminary，不能标为 PASS。
+
+## Claude Read-only Review Gate
+
+每个开发板块 / phase / 可验证切片完成后，必须进入 Claude CLI 只读审阅 gate。Codex 负责实现和修复，Claude 只负责审阅，不改文件。
+
+Gate 顺序：
+
+1. Codex 完成实现，更新相关 `memory/`。
+2. Codex 跑本切片要求的本地验证。
+3. Codex 主动调用 `@电脑` 做桌面应用验证；用户可见功能至少检查菜单栏/托盘入口、窗口导航、关键交互、系统弹窗、安装后运行状态和视觉布局。
+4. Codex 准备 review packet：任务目标、改动文件、验证结果、`@电脑` 桌面验证结果、`git diff --stat`、相关 diff、风险说明。
+5. 调用 Claude CLI 做只读审阅。
+6. Claude 输出 P0 / P1 / P2 findings 和最终 gate verdict。
+7. 如果有 P0 或 P1，Gate = FAIL，Codex 必须修复后重新验证、重新审阅。
+8. 如果没有 P0/P1，Gate = PASS；P2 只记录为后续优化，不阻塞当前切片。
+
+Severity 规则：
+
+- P0：数据丢失、凭证泄漏、安全/隐私违规、构建或核心链路不可用、会阻止用户完成主流程的严重问题。必须修。
+- P1：must fix / gate blocker；会造成错误行为、可靠复现的崩溃、契约破坏、关键状态丢失、明显 UI 阻塞或测试缺口。必须修。
+- P2：非阻塞改进、可维护性、轻微 UX、命名、局部重构建议。记录即可，不阻塞 PASS。
+
+Claude CLI 默认只读命令形态：
+
+```bash
+claude -p --output-format text --disable-slash-commands --safe-mode --model sonnet --tools "" --no-session-persistence "$REVIEW_PROMPT"
+```
+
+要求：
+
+- 不给 Claude 写权限，不让它执行 edit/commit/push。
+- 优先把 diff 和必要上下文放入 prompt；如果上下文太大，缩小到当前切片文件。
+- Claude timeout、no output、输出无法判断 gate verdict，都不是 PASS，必须报告为 blocked 并重试或缩小 review packet。
+- Review 结果必须写入 `memory/review-gate.md` 和相关 progress memory。
+- Codex 修复 P0/P1 后必须重新跑验证和 Claude gate，直到 PASS 或明确阻塞。
 
 ## Git And Release Hygiene
 
 - 提交前检查 `git status --short --branch` 和 intentional diff。
-- 每次开始新的更新或迭代前，先提交当前已验证状态，commit message 使用中文，避免后续改动覆盖可回退基线。
 - 不使用 `git add .`，除非本次任务明确要纳入全部变更。
-- commit 只在用户要求时做；给这个用户提交时使用中文 commit message。
+- commit 只在用户明确要求时做；给这个用户提交时使用中文 commit message。
+- push 只在用户明确要求时做。`AGENTS.md` 和 `memory/` 可以先作为本地工作协议持续完善，不默认推送。
 - push 前确认 remote、branch、secret scan 和验证结果。不要根据旧记忆假设 GitHub remote 已绑定或已推送。
 
 ## Reporting

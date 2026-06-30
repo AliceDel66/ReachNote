@@ -1,6 +1,0 @@
-# ReachNote Rust workspace.
-# core 独立于 Tauri，便于快速单元测试；src-tauri 作为独立 crate（exclude），避免其首次编译拖慢核心验证。
-[workspace]
-resolver = "2"
-members = ["crates/core"]
-exclude = ["src-tauri"]

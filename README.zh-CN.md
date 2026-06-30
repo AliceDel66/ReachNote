@@ -20,7 +20,7 @@
 > ReachNote 是一款**跨平台（macOS / Windows）桌面端 AI 信息采集工具**。你在浏览 GitHub、网页、视频、RSS 时一键收藏链接，本地 Agent 自动读取内容、调用 AI 总结分析，并写入你绑定的 Notion 数据库，形成一个可持续更新、可检索、可比较的个人研究库。
 
 > [!NOTE]
-> **项目状态：早期开发中（Pre-Alpha）。** 产品定位、信息架构、技术栈已收敛，核心代码正在开发。目前已可跑通 P0 竖切（URL → AI 分析 → 结构化研究卡）。下文标注「拟定 / 开发中」的部分代表目标形态，尚未完全落地。
+> **项目状态：PRD 重置（Pre-Alpha）。** 2026-06-30 已按用户要求清空旧实现进度。本文档现在只描述产品意图与历史方向；下一轮实现以 [`plans/prds/20260630-1906-reachnote-mvp-reset.prd.md`](plans/prds/20260630-1906-reachnote-mvp-reset.prd.md) 为当前 source of truth。
 
 ---
 
@@ -238,7 +238,7 @@ flowchart LR
 | 应用外壳 | **Tauri 2**（跨平台 macOS / Windows） |
 | 前端 | **React 18** + TypeScript + Vite |
 | UI 组件 | **HeroUI** + Tailwind CSS |
-| 核心后端 | **Rust**（`reachnote-core`，已单元测试） |
+| 核心后端 | **Rust**（`reachnote-core`，待重建） |
 | 持久化 | SQLite |
 | 凭证存储 | 操作系统钥匙串（keyring） |
 | 分发 | Tauri bundler → `.dmg` / `.msi` |
@@ -247,16 +247,18 @@ flowchart LR
 
 ---
 
-## 项目结构
+## 目标项目结构
+
+2026-06-30 已清空旧实现。下面是 PRD 确认后需要重新建立的目标结构。
 
 ```text
 rearchnote/
-├─ crates/core/        # reachnote-core：纯逻辑核心（Rust，已单测）
+├─ crates/core/        # reachnote-core：纯逻辑核心（重建后补单测）
 │  └─ src/
 │     ├─ ai/           # AI Provider 抽象：claude-cli / codex-cli / openai-api + 结构化解析
 │     └─ reach.rs      # 封装对 Agent-Reach CLI 的调用
 ├─ src-tauri/          # Tauri 应用外壳：capture command、托盘、持久化
-├─ src/                # React + HeroUI 前端（最小 Capture 界面）
+├─ src/                # React + HeroUI 前端（队列优先桌面 UI）
 ├─ Cargo.toml          # Rust workspace
 └─ package.json        # 前端依赖 + Tauri CLI
 ```
@@ -266,7 +268,7 @@ rearchnote/
 ## 快速开始
 
 > [!IMPORTANT]
-> 早期阶段。当前已可跑通 **P0 竖切**：输入 URL（或直接粘贴正文）→ 调用 AI Provider → 返回结构化研究卡。Notion 写入、托盘、队列持久化仍在开发中。
+> PRD 重置阶段。旧的可运行实现已清空，当前没有可直接运行的 app scaffold；后续重建应从 [`plans/prds/20260630-1906-reachnote-mvp-reset.prd.md`](plans/prds/20260630-1906-reachnote-mvp-reset.prd.md) 开始。
 
 ### 环境要求
 
@@ -276,6 +278,8 @@ rearchnote/
 - 一个 Notion 账号（写入用，开发中）
 
 ### 运行
+
+PRD 确认并重新建立 Tauri/React/Rust 脚手架后，目标命令是：
 
 ```bash
 git clone git@github.com:AliceDel66/ReachNote.git
