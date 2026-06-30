@@ -1,5 +1,10 @@
+// from_str 系列方法有意返回 Option（解析外部/DB 文本，非法值即 None），
+// 不实现 std::str::FromStr，因此放宽该 lint。
+#![allow(clippy::should_implement_trait)]
+
 use serde::Serialize;
 
+pub mod analysis;
 pub mod task;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -12,7 +17,7 @@ pub struct ShellStatus {
 pub fn shell_status() -> ShellStatus {
     ShellStatus {
         product: "ReachNote",
-        phase: "static-shell",
+        phase: "local-analysis",
         default_screen: "queue",
     }
 }
@@ -26,7 +31,7 @@ mod tests {
         let status = shell_status();
 
         assert_eq!(status.product, "ReachNote");
-        assert_eq!(status.phase, "static-shell");
+        assert_eq!(status.phase, "local-analysis");
         assert_eq!(status.default_screen, "queue");
     }
 }

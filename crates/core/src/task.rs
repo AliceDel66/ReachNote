@@ -6,6 +6,7 @@ pub enum TaskStatus {
     Queued,
     Reading,
     Analyzing,
+    Analyzed,
     Syncing,
     Synced,
     Failed,
@@ -17,6 +18,7 @@ impl TaskStatus {
             Self::Queued => "queued",
             Self::Reading => "reading",
             Self::Analyzing => "analyzing",
+            Self::Analyzed => "analyzed",
             Self::Syncing => "syncing",
             Self::Synced => "synced",
             Self::Failed => "failed",
@@ -28,6 +30,7 @@ impl TaskStatus {
             "queued" => Some(Self::Queued),
             "reading" => Some(Self::Reading),
             "analyzing" => Some(Self::Analyzing),
+            "analyzed" => Some(Self::Analyzed),
             "syncing" => Some(Self::Syncing),
             "synced" => Some(Self::Synced),
             "failed" => Some(Self::Failed),
@@ -86,6 +89,9 @@ pub struct Task {
     pub source_domain: Option<String>,
     pub score: Option<u8>,
     pub model: Option<String>,
+    pub provider_id: String,
+    pub note: Option<String>,
+    pub analysis_json: Option<String>,
     pub notion_page_id: Option<String>,
     pub error_kind: Option<ErrorKind>,
     pub error_message: Option<String>,
@@ -135,9 +141,7 @@ impl ParsedUrl {
             return Err(ErrorKind::InvalidUrl);
         }
 
-        let authority_end = rest
-            .find(['/', '?', '#'])
-            .unwrap_or(rest.len());
+        let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
         let authority = &rest[..authority_end];
         let suffix = &rest[authority_end..];
         if authority.is_empty() || authority.contains(' ') {

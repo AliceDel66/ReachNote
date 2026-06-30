@@ -1,10 +1,10 @@
 # ReachNote Memory
 
-Last updated: 2026-06-30
+Last updated: 2026-07-01
 
 ## Current Snapshot
 
-状态：In Progress / Local queue worker foundation
+状态：In Progress / Agent-Reach content reading wired to local analysis
 
 用户要求清空旧实现后，当前已恢复 Tauri 2 + React 18 + HeroUI + Rust core 最小桌面壳，并推进到本地 SQLite 队列与最小 worker 地基。
 
@@ -14,8 +14,8 @@ Last updated: 2026-06-30
 - `src/`、`src-tauri/`、`crates/core/` 当前已有新脚手架和本地队列实现，不能再按“无源码”假设工作。
 - 新版 UI 设计图登记在 `memory/design-source.md`。
 - 新 PRD 输出在 `plans/prds/20260630-1906-reachnote-mvp-reset.prd.md`。
-- 最新代码链路：`Article URL -> create_capture_task -> SQLite tasks -> run_capture_task -> Claude CLI availability check -> Analyzing/Failed -> Queue UI`。
-- 当前 worker 只检查 Claude CLI 是否可用；不调用 Claude、不接 Agent-Reach、不请求网页、不写 Notion。缺少 Claude CLI 时写入 `Failed/provider_unavailable/error_message`。
+- 最新代码链路：`Article URL -> create_capture_task(provider_id) -> SQLite tasks -> run_capture_task -> AgentReachWebReader(Jina Reader) -> AnalysisRequest(content_text/content_reader) -> ProviderRunner -> AnalysisResult JSON validation -> Analyzed/Failed -> Queue UI`。
+- 当前 worker 支持 `claude_cli`、`codex_cli`、`openai_compatible` 三种 provider。Claude/Codex 走本地 CLI，OpenAI-compatible 读取 `REACHNOTE_OPENAI_BASE_URL` / `REACHNOTE_OPENAI_MODEL` / 可选 `REACHNOTE_OPENAI_API_KEY`。Agent-Reach web route 现以 Jina Reader 作为文章正文读取入口；Notion 仍未写入。
 
 ## Rules
 
@@ -30,9 +30,9 @@ Last updated: 2026-06-30
 | --- | --- |
 | `design-source.md` | 新版 UI 设计源和产品界面约束 |
 | `development-plan.md` | P0 上下文校准、官方文档确认、第一刀范围和验证命令 |
-| `frontend-progress.md` | 前端当前状态；队列/采集 UI 已接本地任务和失败展示 |
-| `backend-progress.md` | 后端当前状态；SQLite tasks、TaskStatus、最小 worker 已接 |
-| `integration-progress.md` | 端到端状态；本地 queue + provider_unavailable 失败路径已通 |
+| `frontend-progress.md` | 前端当前状态；队列/采集/设置已接 provider 选择和分析结果展示 |
+| `backend-progress.md` | 后端当前状态；SQLite tasks、TaskStatus、AnalysisResult、多 provider worker 已接 |
+| `integration-progress.md` | 端到端状态；本地 queue + structured analysis + provider failure 路径已通 |
 | `review-gate.md` | 后续 review/gate 规则基线 |
 | `desktop-qa.md` | 桌面验证基线；Tauri dev 冒烟通过，Computer Use 仍 blocked |
 
@@ -55,3 +55,13 @@ Last updated: 2026-06-30
 - 提交并推送当前基线：`c49c530`，中文 commit `实现本地队列闭环与静态桌面壳`，已推送 `origin/main`。
 - 第三刀实现：新增本地最小 worker `run_capture_task`，任务先写 `Analyzing`，再做本地 Claude CLI 可执行文件检测；缺少 CLI 时写回 `Failed/provider_unavailable/error_message`。前端创建任务后自动触发 worker，队列页展示失败原因并提供重试按钮。
 - 验证：`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo check --manifest-path src-tauri/Cargo.toml` 通过；`REACHNOTE_CLAUDE_CMD=__missing_claude__ pnpm tauri dev` 真实桌面冒烟通过，SQLite latest tasks 显示 `failed/provider_unavailable`，队列 UI 可见失败原因。
+
+### 2026-07-01
+
+- 第四刀实现：结构化分析成功路径完成。新增 `crates/core/src/analysis.rs`，定义 `ProviderId`、`AnalysisRequest`、`AnalysisResult`、JSON 校验和统一 prompt。
+- 扩展 provider：`claude_cli`、`codex_cli`、`openai_compatible` 共享同一套结构化 JSON 契约；CLI 调用增加 timeout，OpenAI-compatible 使用本地配置的 base/model/api key。
+- 扩展 SQLite `tasks`：新增 `provider_id`、`note`、`analysis_json`，新增 `analyzed` 状态；旧表会自动重建迁移，旧任务默认 `claude_cli`。
+- 前端扩展：采集页和设置页可选择 AI provider；队列页支持 `已分析` 状态、标题、评分和模型展示；底部状态栏显示当前 provider。
+- 验证：`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml` 均通过；Tauri dev 使用 fake Claude CLI 完成真实窗口冒烟，SQLite 最新任务为 `analyzed` 且写入 `analysis_json`。
+- 第五刀实现：Agent-Reach 内容读取接入 `AnalysisRequest` 正文输入。新增 `src-tauri/src/reader.rs`，通过 `REACHNOTE_AGENT_REACH_WEB_READER_BASE_URL`（默认 `https://r.jina.ai`）读取文章正文，成功后把 `content_text` / `content_reader` 注入统一 provider prompt；读取失败会写回 `Failed/read_failed` 或 `network_failed`。
+- 验证：`cargo test -p reachnote-core` 13 个测试通过，`cargo test --manifest-path src-tauri/Cargo.toml` 15 个测试通过；Tauri dev 使用本地 mock Jina Reader + fake Claude CLI 完成真实窗口冒烟，SQLite 最新任务为 `analyzed/Reader Content OK`，`analysis_json.summary` 证明正文已进入 provider prompt。

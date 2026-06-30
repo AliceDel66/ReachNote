@@ -2,7 +2,6 @@ import {
   BadgeInfo,
   Beaker,
   CheckCircle2,
-  ChevronDown,
   Clipboard,
   FileText,
   Github,
@@ -26,9 +25,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import brandMark from "../assets/reachnote_brand_assets/png/icon/reachnote-symbol-transparent-64.png";
 
 type NavKey = "capture" | "queue" | "templates" | "settings";
-type TaskStatus = "queued" | "reading" | "analyzing" | "syncing" | "synced" | "failed";
+type TaskStatus = "queued" | "reading" | "analyzing" | "analyzed" | "syncing" | "synced" | "failed";
 type QueueFilter = "all" | "processing" | "done" | "failed";
 type QueueLoadState = "loading" | "ready" | "error";
+type AiProviderId = "claude_cli" | "codex_cli" | "openai_compatible";
 
 interface Task {
   id: string;
@@ -40,6 +40,9 @@ interface Task {
   source_domain: string | null;
   score: number | null;
   model: string | null;
+  provider_id: AiProviderId;
+  note: string | null;
+  analysis_json: string | null;
   notion_page_id: string | null;
   error_kind: string | null;
   error_message: string | null;
@@ -74,6 +77,16 @@ const NAV_ITEMS: Array<{ key: NavKey; label: string }> = [
   { key: "templates", label: "模板" },
   { key: "settings", label: "设置" }
 ];
+
+const AI_PROVIDERS: Array<{ id: AiProviderId; label: string; hint: string }> = [
+  { id: "claude_cli", label: "Claude CLI", hint: "默认，本地 claude 命令" },
+  { id: "codex_cli", label: "Codex CLI", hint: "本地 codex exec 非交互分析" },
+  { id: "openai_compatible", label: "OpenAI-compatible API", hint: "使用 REACHNOTE_OPENAI_* 环境变量" }
+];
+
+function providerLabel(providerId: AiProviderId): string {
+  return AI_PROVIDERS.find((provider) => provider.id === providerId)?.label ?? "Claude CLI";
+}
 
 const TEMPLATES: TemplateItem[] = [
   {
@@ -144,7 +157,7 @@ function taskMatchesFilter(status: TaskStatus, filter: QueueFilter): boolean {
   }
 
   if (filter === "done") {
-    return status === "synced";
+    return status === "analyzed" || status === "synced";
   }
 
   return status === "failed";
@@ -155,6 +168,7 @@ function statusLabel(status: TaskStatus): string {
     queued: "排队中",
     reading: "读取中",
     analyzing: "分析中",
+    analyzed: "已分析",
     syncing: "同步中",
     synced: "已完成",
     failed: "失败"
@@ -227,6 +241,7 @@ function App() {
   const [captureError, setCaptureError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null);
+  const [selectedProviderId, setSelectedProviderId] = useState<AiProviderId>("claude_cli");
   const isUrlValid = isValidArticleUrl(url);
 
   const loadTasks = useCallback(async () => {
@@ -300,7 +315,8 @@ function App() {
     try {
       const createdTask = await invoke<Task>("create_capture_task", {
         url: url.trim(),
-        note: note.trim() ? note : null
+        note: note.trim() ? note : null,
+        providerId: selectedProviderId
       });
       setUrl("");
       setNote("");
@@ -361,14 +377,21 @@ function App() {
             isUrlValid={isUrlValid}
             isSubmitting={isSubmitting}
             error={captureError}
+            selectedProviderId={selectedProviderId}
+            onProviderChange={setSelectedProviderId}
             onSubmit={handleCaptureSubmit}
             onPasteFromClipboard={handlePasteFromClipboard}
           />
         )}
         {activeNav === "templates" && <TemplatesView />}
-        {activeNav === "settings" && <SettingsView />}
+        {activeNav === "settings" && (
+          <SettingsView
+            selectedProviderId={selectedProviderId}
+            onProviderChange={setSelectedProviderId}
+          />
+        )}
       </section>
-      {activeNav === "queue" && <StatusBar />}
+      {activeNav === "queue" && <StatusBar providerLabel={providerLabel(selectedProviderId)} />}
     </main>
   );
 }
@@ -564,7 +587,7 @@ function QueueView({
 
       <div className="soft-banner">
         <BadgeInfo size={24} />
-        <span>本地 SQLite 队列与最小 worker 已启用；当前仅检查 Claude CLI 可用性，不读取网页、不同步 Notion。</span>
+        <span>本地 SQLite 队列与 Agent-Reach web 读取已启用；当前会先读取文章正文再分析，Notion 同步后续接入。</span>
       </div>
     </div>
   );
@@ -580,11 +603,11 @@ function StatusPill({ status }: { status: TaskStatus }) {
     );
   }
 
-  if (status === "synced") {
+  if (status === "analyzed" || status === "synced") {
     return (
       <span className="status-pill done">
         <CheckCircle2 size={18} />
-        已完成
+        {statusLabel(status)}
       </span>
     );
   }
@@ -625,6 +648,8 @@ interface CaptureViewProps {
   isUrlValid: boolean;
   isSubmitting: boolean;
   error: string | null;
+  selectedProviderId: AiProviderId;
+  onProviderChange: (providerId: AiProviderId) => void;
   onSubmit: () => void;
   onPasteFromClipboard: () => void;
 }
@@ -637,6 +662,8 @@ function CaptureView({
   isUrlValid,
   isSubmitting,
   error,
+  selectedProviderId,
+  onProviderChange,
   onSubmit,
   onPasteFromClipboard
 }: CaptureViewProps) {
@@ -689,11 +716,21 @@ function CaptureView({
           <span className="counter">{note.length} / 500</span>
         </div>
 
-        <label className="field-label">AI 提供方</label>
-        <button className="select-shell" type="button">
-          <span>Claude CLI</span>
-          <ChevronDown size={20} />
-        </button>
+        <label className="field-label" htmlFor="ai-provider">
+          AI 提供方
+        </label>
+        <select
+          id="ai-provider"
+          className="select-shell native-select"
+          value={selectedProviderId}
+          onChange={(event) => onProviderChange(event.currentTarget.value as AiProviderId)}
+        >
+          {AI_PROVIDERS.map((provider) => (
+            <option key={provider.id} value={provider.id}>
+              {provider.label}
+            </option>
+          ))}
+        </select>
 
         <button
           className="primary-action"
@@ -839,25 +876,36 @@ function TemplateCard({ item }: { item: TemplateItem }) {
   );
 }
 
-function SettingsView() {
+interface SettingsViewProps {
+  selectedProviderId: AiProviderId;
+  onProviderChange: (providerId: AiProviderId) => void;
+}
+
+function SettingsView({ selectedProviderId, onProviderChange }: SettingsViewProps) {
   return (
     <div className="settings-screen">
       <h1>偏好设置</h1>
       <section className="settings-card">
         <h2>1. AI 提供方</h2>
-        <RadioLine active label="Claude CLI（默认）" />
-        <RadioLine label="Codex CLI（计划中）" />
-        <RadioLine label="OpenAI-compatible API（计划中）" />
+        {AI_PROVIDERS.map((provider) => (
+          <RadioLine
+            active={selectedProviderId === provider.id}
+            hint={provider.hint}
+            key={provider.id}
+            label={provider.label}
+            onClick={() => onProviderChange(provider.id)}
+          />
+        ))}
       </section>
       <section className="settings-card">
         <h2>2. Agent-Reach</h2>
         <div className="settings-row">
-          <span>命令</span>
-          <strong>agent-reach</strong>
+          <span>Web 读取</span>
+          <strong>Jina Reader</strong>
         </div>
         <div className="settings-row muted">
-          <span>Doctor（计划中）</span>
-          <em>计划中</em>
+          <span>来源</span>
+          <em>Agent-Reach web route</em>
         </div>
       </section>
       <section className="settings-card notion-settings">
@@ -872,26 +920,39 @@ function SettingsView() {
       </section>
       <section className="settings-card privacy-card">
         <h2>4. 隐私与存储</h2>
-        <p>本地优先、无中间服务器，凭证未来接入系统钥匙串。</p>
+        <p>本地优先、无中间服务器；OpenAI-compatible API 目前只读取环境变量，凭证未来接入系统钥匙串。</p>
       </section>
       <div className="soft-banner settings-note">
         <BadgeInfo size={24} />
-        <span>当前设置项仅作为界面承载，后续将接入真实持久化配置。</span>
+        <span>AI provider 选择已接入当前会话；持久化配置和 keychain 后续接入。</span>
       </div>
     </div>
   );
 }
 
-function RadioLine({ active, label }: { active?: boolean; label: string }) {
+function RadioLine({
+  active,
+  hint,
+  label,
+  onClick
+}: {
+  active?: boolean;
+  hint: string;
+  label: string;
+  onClick: () => void;
+}) {
   return (
-    <div className="radio-line">
+    <button className="radio-line" type="button" onClick={onClick}>
       <span className={`radio-dot ${active ? "active" : ""}`} />
-      <span>{label}</span>
-    </div>
+      <span>
+        <strong>{label}</strong>
+        <small>{hint}</small>
+      </span>
+    </button>
   );
 }
 
-function StatusBar() {
+function StatusBar({ providerLabel }: { providerLabel: string }) {
   return (
     <footer className="status-bar">
       <span>
@@ -904,7 +965,7 @@ function StatusBar() {
       </span>
       <span>
         <span className="ai-badge">AI</span>
-        Claude CLI
+        {providerLabel}
       </span>
     </footer>
   );
