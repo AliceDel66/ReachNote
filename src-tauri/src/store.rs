@@ -84,6 +84,55 @@ impl TaskStore {
         Ok(())
     }
 
+    pub fn update_task(&self, task: &Task) -> Result<(), StoreError> {
+        validate_task_for_storage(task)?;
+        let connection = self.lock_connection()?;
+        let changed_rows = connection.execute(
+            "UPDATE tasks SET
+                url = ?2,
+                source_type = ?3,
+                template_id = ?4,
+                status = ?5,
+                title = ?6,
+                source_domain = ?7,
+                score = ?8,
+                model = ?9,
+                notion_page_id = ?10,
+                error_kind = ?11,
+                error_message = ?12,
+                created_at = ?13,
+                updated_at = ?14,
+                synced_at = ?15
+            WHERE id = ?1",
+            params![
+                &task.id,
+                &task.url,
+                &task.source_type,
+                &task.template_id,
+                task.status.as_str(),
+                &task.title,
+                &task.source_domain,
+                task.score.map(i64::from),
+                &task.model,
+                &task.notion_page_id,
+                task.error_kind.map(ErrorKind::as_str),
+                &task.error_message,
+                &task.created_at,
+                &task.updated_at,
+                &task.synced_at,
+            ],
+        )?;
+
+        if changed_rows == 0 {
+            return Err(StoreError {
+                kind: ErrorKind::ReadFailed,
+                message: format!("找不到本地队列任务: {}", task.id),
+            });
+        }
+
+        Ok(())
+    }
+
     pub fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let connection = self.lock_connection()?;
         let mut statement = connection.prepare(
@@ -102,7 +151,6 @@ impl TaskStore {
         Ok(tasks)
     }
 
-    #[allow(dead_code)]
     pub fn get_task(&self, id: &str) -> Result<Option<Task>, StoreError> {
         let connection = self.lock_connection()?;
         connection

@@ -56,6 +56,8 @@ interface QueueRow {
   time: string;
   score: number | null;
   model: string;
+  errorKind: string | null;
+  errorMessage: string | null;
 }
 
 interface TemplateItem {
@@ -112,8 +114,24 @@ function taskToQueueRow(task: Task): QueueRow {
     status: task.status,
     time: formatTimestamp(task.created_at),
     score: task.score,
-    model: task.model ?? "-"
+    model: task.model ?? "-",
+    errorKind: task.error_kind,
+    errorMessage: task.error_message
   };
+}
+
+function upsertTask(tasks: Task[], nextTask: Task): Task[] {
+  let replaced = false;
+  const nextTasks = tasks.map((task) => {
+    if (task.id === nextTask.id) {
+      replaced = true;
+      return nextTask;
+    }
+
+    return task;
+  });
+
+  return replaced ? nextTasks : [nextTask, ...nextTasks];
 }
 
 function taskMatchesFilter(status: TaskStatus, filter: QueueFilter): boolean {
@@ -208,6 +226,7 @@ function App() {
   const [note, setNote] = useState("");
   const [captureError, setCaptureError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null);
   const isUrlValid = isValidArticleUrl(url);
 
   const loadTasks = useCallback(async () => {
@@ -240,11 +259,26 @@ function App() {
     }
 
     return filteredRows.filter((item) => {
-      return [item.title, item.source, item.model, item.status].some((value) =>
+      return [item.title, item.source, item.model, item.status, item.errorKind, item.errorMessage].some((value) =>
+        value &&
         value.toLowerCase().includes(normalizedSearch)
       );
     });
   }, [queueFilter, queueRows, searchTerm]);
+
+  const handleRunTask = useCallback(async (id: string) => {
+    setRetryingTaskId(id);
+    try {
+      const updatedTask = await invoke<Task>("run_capture_task", { id });
+      setTasks((currentTasks) => upsertTask(currentTasks, updatedTask));
+      setQueueError(null);
+    } catch (error) {
+      setQueueError(readableError(error));
+    } finally {
+      setRetryingTaskId(null);
+      await loadTasks();
+    }
+  }, [loadTasks]);
 
   const handleSearchClick = () => {
     const shouldOpen = activeNav !== "queue" || !searchOpen;
@@ -264,14 +298,15 @@ function App() {
     setIsSubmitting(true);
     setCaptureError(null);
     try {
-      await invoke<Task>("create_capture_task", {
+      const createdTask = await invoke<Task>("create_capture_task", {
         url: url.trim(),
         note: note.trim() ? note : null
       });
       setUrl("");
       setNote("");
-      await loadTasks();
+      setTasks((currentTasks) => upsertTask(currentTasks, createdTask));
       setActiveNav("queue");
+      await handleRunTask(createdTask.id);
     } catch (error) {
       setCaptureError(readableError(error));
     } finally {
@@ -313,6 +348,8 @@ function App() {
             searchOpen={searchOpen}
             searchTerm={searchTerm}
             onSearchTermChange={setSearchTerm}
+            onRetryTask={handleRunTask}
+            retryingTaskId={retryingTaskId}
           />
         )}
         {activeNav === "capture" && (
@@ -413,6 +450,8 @@ interface QueueViewProps {
   searchOpen: boolean;
   searchTerm: string;
   onSearchTermChange: (term: string) => void;
+  onRetryTask: (id: string) => void;
+  retryingTaskId: string | null;
 }
 
 function QueueView({
@@ -424,7 +463,9 @@ function QueueView({
   onRetryLoad,
   searchOpen,
   searchTerm,
-  onSearchTermChange
+  onSearchTermChange,
+  onRetryTask,
+  retryingTaskId
 }: QueueViewProps) {
   const filters: Array<{ key: QueueFilter; label: string }> = [
     { key: "all", label: "全部" },
@@ -472,7 +513,12 @@ function QueueView({
         </div>
         {loadState === "ready" && rows.map((item) => (
           <div className="queue-row" role="row" key={item.id}>
-            <span className="queue-title">{item.title}</span>
+            <span className="queue-title-cell">
+              <span className="queue-title">{item.title}</span>
+              {item.errorMessage && (
+                <span className="queue-error-message">{item.errorMessage}</span>
+              )}
+            </span>
             <span className="source-cell">{item.source}</span>
             <span>
               <StatusPill status={item.status} />
@@ -481,7 +527,19 @@ function QueueView({
             <span>
               <Score value={item.score} />
             </span>
-            <span className="model-cell">{item.model}</span>
+            <span className="model-cell">
+              <span>{item.model}</span>
+              {item.status === "failed" && (
+                <button
+                  className="row-action"
+                  type="button"
+                  disabled={retryingTaskId === item.id}
+                  onClick={() => onRetryTask(item.id)}
+                >
+                  {retryingTaskId === item.id ? "重试中" : "重试"}
+                </button>
+              )}
+            </span>
           </div>
         ))}
         {loadState === "loading" && (
@@ -506,7 +564,7 @@ function QueueView({
 
       <div className="soft-banner">
         <BadgeInfo size={24} />
-        <span>本地 SQLite 队列已启用；本阶段仅创建排队任务，AI 与 Notion 后续接入。</span>
+        <span>本地 SQLite 队列与最小 worker 已启用；当前仅检查 Claude CLI 可用性，不读取网页、不同步 Notion。</span>
       </div>
     </div>
   );

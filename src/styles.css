@@ -267,10 +267,28 @@ textarea {
   background: rgba(249, 250, 251, 0.42);
 }
 
+.queue-title-cell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
 .queue-title {
+  display: block;
   color: #101828;
   font-size: 18px;
   font-weight: 520;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-error-message {
+  display: block;
+  color: #b42318;
+  font-size: 13px;
+  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -280,6 +298,40 @@ textarea {
 .muted-cell,
 .model-cell {
   color: #475569;
+}
+
+.model-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.model-cell > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-action {
+  height: 28px;
+  flex: 0 0 auto;
+  padding: 0 9px;
+  border: 1px solid #b8d4ff;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.row-action:disabled {
+  border-color: #e2e8f0;
+  color: #98a2b3;
+  cursor: wait;
 }
 
 .status-pill {

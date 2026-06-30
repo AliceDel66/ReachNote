@@ -4,16 +4,18 @@ Last updated: 2026-06-30
 
 ## Current Snapshot
 
-状态：Reset to PRD stage
+状态：In Progress / Local queue worker foundation
 
-用户要求清空当前仓库已开发实现进度，并以新版 UI 设计图和 README 产品方向为核心，先产出轻量 PRD。
+用户要求清空旧实现后，当前已恢复 Tauri 2 + React 18 + HeroUI + Rust core 最小桌面壳，并推进到本地 SQLite 队列与最小 worker 地基。
 
 当前事实：
 
-- 旧前端、Tauri、Rust core、构建配置、旧 QA 和旧 progress memory 已从工作树删除。
-- `README.md` / `README.zh-CN.md`、`docs/adr/0001-tech-stack.md`、`docs/discussions/mvp-prd-information-architecture.md` 保留为产品输入，但不得再当作已实现状态。
+- 旧前端、Tauri、Rust core、构建配置、旧 QA 和旧 progress memory 已从工作树删除；后续实现均来自 reset 后的新代码。
+- `src/`、`src-tauri/`、`crates/core/` 当前已有新脚手架和本地队列实现，不能再按“无源码”假设工作。
 - 新版 UI 设计图登记在 `memory/design-source.md`。
 - 新 PRD 输出在 `plans/prds/20260630-1906-reachnote-mvp-reset.prd.md`。
+- 最新代码链路：`Article URL -> create_capture_task -> SQLite tasks -> run_capture_task -> Claude CLI availability check -> Analyzing/Failed -> Queue UI`。
+- 当前 worker 只检查 Claude CLI 是否可用；不调用 Claude、不接 Agent-Reach、不请求网页、不写 Notion。缺少 Claude CLI 时写入 `Failed/provider_unavailable/error_message`。
 
 ## Rules
 
@@ -28,11 +30,11 @@ Last updated: 2026-06-30
 | --- | --- |
 | `design-source.md` | 新版 UI 设计源和产品界面约束 |
 | `development-plan.md` | P0 上下文校准、官方文档确认、第一刀范围和验证命令 |
-| `frontend-progress.md` | 前端当前状态；目前为 Cleared |
-| `backend-progress.md` | 后端当前状态；目前为 Cleared |
-| `integration-progress.md` | 端到端状态；目前为 PRD-only |
+| `frontend-progress.md` | 前端当前状态；队列/采集 UI 已接本地任务和失败展示 |
+| `backend-progress.md` | 后端当前状态；SQLite tasks、TaskStatus、最小 worker 已接 |
+| `integration-progress.md` | 端到端状态；本地 queue + provider_unavailable 失败路径已通 |
 | `review-gate.md` | 后续 review/gate 规则基线 |
-| `desktop-qa.md` | 桌面验证基线；目前无可运行 app |
+| `desktop-qa.md` | 桌面验证基线；Tauri dev 冒烟通过，Computer Use 仍 blocked |
 
 ## Progress Log
 
@@ -50,3 +52,6 @@ Last updated: 2026-06-30
 - 验证：`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo check --manifest-path src-tauri/Cargo.toml`、`pnpm tauri dev` 均通过；Browser smoke 无 console error/warn。Computer Use 直接桌面验证因旧安装版 `/Applications/ReachNote.app` 与 dev binary 目标冲突而标为 Blocked。
 - 第二刀实现：本地队列数据流完成。新增 core task 类型/校验、Tauri SQLite store、`create_capture_task` / `list_capture_tasks`、前端真实 invoke；合法 URL 可创建 `Queued` 任务，重启 app 后队列仍从 SQLite 显示该任务。
 - 修复项：前端 logo 改 Vite import，`.gitignore` 不再忽略正式 `docs/`，`time = "=0.3.41"` 加 workaround 注释。
+- 提交并推送当前基线：`c49c530`，中文 commit `实现本地队列闭环与静态桌面壳`，已推送 `origin/main`。
+- 第三刀实现：新增本地最小 worker `run_capture_task`，任务先写 `Analyzing`，再做本地 Claude CLI 可执行文件检测；缺少 CLI 时写回 `Failed/provider_unavailable/error_message`。前端创建任务后自动触发 worker，队列页展示失败原因并提供重试按钮。
+- 验证：`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo check --manifest-path src-tauri/Cargo.toml` 通过；`REACHNOTE_CLAUDE_CMD=__missing_claude__ pnpm tauri dev` 真实桌面冒烟通过，SQLite latest tasks 显示 `failed/provider_unavailable`，队列 UI 可见失败原因。

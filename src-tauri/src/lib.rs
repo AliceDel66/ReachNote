@@ -3,8 +3,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use reachnote_core::task::{validate_article_url, ErrorKind, Task, TaskStatus};
 use tauri::{Manager, State};
 
+mod provider;
 mod store;
 
+use provider::ClaudeCliAvailability;
 use store::TaskStore;
 
 #[tauri::command]
@@ -55,6 +57,34 @@ fn list_capture_tasks(store: State<'_, TaskStore>) -> Result<Vec<Task>, String> 
         .map_err(|error| command_error(error.kind, &error.message))
 }
 
+#[tauri::command]
+fn run_capture_task(store: State<'_, TaskStore>, id: String) -> Result<Task, String> {
+    let mut task = store
+        .get_task(&id)
+        .map_err(|error| command_error(error.kind, &error.message))?
+        .ok_or_else(|| command_error(ErrorKind::ReadFailed, &format!("找不到本地队列任务: {id}")))?;
+
+    task.status = TaskStatus::Analyzing;
+    task.error_kind = None;
+    task.error_message = None;
+    task.updated_at = current_unix_timestamp();
+    store
+        .update_task(&task)
+        .map_err(|error| command_error(error.kind, &error.message))?;
+
+    if let Err(message) = ClaudeCliAvailability::from_env().check() {
+        task.status = TaskStatus::Failed;
+        task.error_kind = Some(ErrorKind::ProviderUnavailable);
+        task.error_message = Some(message);
+        task.updated_at = current_unix_timestamp();
+        store
+            .update_task(&task)
+            .map_err(|error| command_error(error.kind, &error.message))?;
+    }
+
+    Ok(task)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
@@ -73,7 +103,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             shell_status,
             create_capture_task,
-            list_capture_tasks
+            list_capture_tasks,
+            run_capture_task
         ])
         .run(tauri::generate_context!())
         .expect("failed to run ReachNote");
