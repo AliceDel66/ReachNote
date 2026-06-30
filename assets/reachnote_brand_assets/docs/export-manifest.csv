@@ -1,0 +1,11 @@
+filename,type,recommended_use
+svg/reachnote-icon-filled.svg,svg,透明图形符号
+svg/reachnote-icon-app.svg,svg,应用图标源文件
+svg/reachnote-icon-outline.svg,svg,线性图标
+svg/reachnote-icon-mono.svg,svg,单色图标
+svg/reachnote-logo-horizontal.svg,svg,浅色背景横版 Logo
+svg/reachnote-logo-horizontal-dark.svg,svg,深色背景横版 Logo
+png/icon/reachnote-icon-1024.png,png,应用商店/大尺寸图标
+png/icon/reachnote-icon-512.png,png,桌面应用图标
+png/icon/reachnote-icon-32.png,png,菜单栏/列表小图标
+favicon/reachnote-favicon.ico,ico,网站 favicon
