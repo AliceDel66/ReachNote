@@ -75,6 +75,7 @@ Last updated: 2026-07-01
 - Bugfix：修复分析成功后同步依赖前端 promise 导致 reload/HMR/关闭时任务停在 `已分析` 的链路缺口。`run_capture_task` 后端现在自动继续同步，队列加载再补扫历史 `Analyzed` 遗留任务；截图中的 `OpenCLI` 已完成真实 Notion 同步。
 - Release CI 修复：`v0.1.0` 首次 tag run `28496282107` 已触发但失败于 `Setup Node`，根因是 workflow 使用 Node 20，而 `pnpm@11.5.0` 需要 Node >= 22.13 并依赖 `node:sqlite`。已将 `.github/workflows/release.yml` 的 `actions/setup-node` 改为 Node 24；本地验证 `node -v` 为 `v24.15.0`、`pnpm -v` 为 `11.5.0`，`git diff --check` 和 `pnpm build` 通过。下一步是提交修复、移动 `v0.1.0` tag 到修复 commit 并重新触发 release workflow。
 - Release CI 二次修复：第二次 tag run `28496402431` 已越过 Node setup，但在 `pnpm install --frozen-lockfile` 失败，具体错误为 `[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: @heroui/shared-utils@2.1.12`。根因是 `pnpm-workspace.yaml` 中 `@heroui/shared-utils` 的 `allowBuilds` 仍是占位值；已改为 `true`，并验证 `pnpm install --frozen-lockfile --force`、`pnpm build`、`git diff --check` 通过。下一步提交修复、再次移动 `v0.1.0` tag 触发 release workflow。
+- Release CI 三次修复：第三次 tag run `28496668063` 中 macOS universal build 已通过，Windows build 失败于 `src-tauri/src/lib.rs:490`，错误为 `no variant named Reopen found for enum RunEvent`。根因是 `tauri::RunEvent::Reopen` 只适合作为 macOS Dock reopen 路径，Windows target 下不可用；已将该匹配加 `#[cfg(target_os = "macos")]`，并在非 macOS 分支显式消费 closure 参数。为避免混入当前工作树其它未提交 tray 改动，修复 hunk 在 index 中单独 staged；临时 clean worktree 验证 `pnpm install --frozen-lockfile`、`pnpm build`、`cargo check --manifest-path src-tauri/Cargo.toml` 通过。下一步提交修复、再次移动 `v0.1.0` tag 触发 release workflow。
 
 #### Notion 测试前置闭环(2026-07-01)
 

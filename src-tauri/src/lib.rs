@@ -487,6 +487,7 @@ pub fn run() {
         .expect("failed to build ReachNote");
 
     app.run(|app_handle, event| {
+        #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen {
             has_visible_windows: false,
             ..
@@ -494,6 +495,9 @@ pub fn run() {
         {
             let _ = restore_main_window_from_app(app_handle);
         }
+
+        #[cfg(not(target_os = "macos"))]
+        let _ = (app_handle, event);
     });
 }
 
