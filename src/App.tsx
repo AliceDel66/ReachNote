@@ -7,10 +7,11 @@ import {
   Github,
   ListChecks,
   Loader2,
+  Minimize2,
   Play,
   Rss,
   Search,
-  Settings,
+  Settings2,
   ShieldCheck,
   Sparkles,
   Star,
@@ -18,7 +19,6 @@ import {
   Text,
   CircleAlert
 } from "lucide-react";
-import { Button } from "@heroui/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -51,6 +51,12 @@ interface Task {
   synced_at: string | null;
 }
 
+interface NotionSettingsView {
+  configured: boolean;
+  database_id: string;
+  token_preview: string | null;
+}
+
 interface QueueRow {
   id: string;
   title: string;
@@ -61,6 +67,7 @@ interface QueueRow {
   model: string;
   errorKind: string | null;
   errorMessage: string | null;
+  notionPageId: string | null;
 }
 
 interface TemplateItem {
@@ -83,6 +90,7 @@ const AI_PROVIDERS: Array<{ id: AiProviderId; label: string; hint: string }> = [
   { id: "codex_cli", label: "Codex CLI", hint: "本地 codex exec 非交互分析" },
   { id: "openai_compatible", label: "OpenAI-compatible API", hint: "使用 REACHNOTE_OPENAI_* 环境变量" }
 ];
+const STALE_TASK_SECONDS = 300;
 
 function providerLabel(providerId: AiProviderId): string {
   return AI_PROVIDERS.find((provider) => provider.id === providerId)?.label ?? "Claude CLI";
@@ -129,7 +137,8 @@ function taskToQueueRow(task: Task): QueueRow {
     score: task.score,
     model: task.model ?? "-",
     errorKind: task.error_kind,
-    errorMessage: task.error_message
+    errorMessage: task.error_message,
+    notionPageId: task.notion_page_id
   };
 }
 
@@ -228,6 +237,10 @@ function readableError(error: unknown): string {
   return "未知错误";
 }
 
+function notionPageUrl(pageId: string): string {
+  return `https://www.notion.so/${pageId.split("-").join("")}`;
+}
+
 function App() {
   const [activeNav, setActiveNav] = useState<NavKey>("queue");
   const [queueFilter, setQueueFilter] = useState<QueueFilter>("all");
@@ -242,11 +255,14 @@ function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null);
   const [selectedProviderId, setSelectedProviderId] = useState<AiProviderId>("claude_cli");
+  const [isTogglingCompact, setIsTogglingCompact] = useState(false);
   const isUrlValid = isValidArticleUrl(url);
 
   const loadTasks = useCallback(async () => {
     setQueueLoadState("loading");
     try {
+      await invoke<Task[]>("recover_interrupted_tasks", { staleAfterSeconds: STALE_TASK_SECONDS });
+      await invoke<Task[]>("sync_pending_analyzed_tasks");
       const nextTasks = await invoke<Task[]>("list_capture_tasks");
       setTasks(nextTasks);
       setQueueError(null);
@@ -257,11 +273,56 @@ function App() {
     }
   }, []);
 
+  // 静默刷新：轮询进行中的任务时用它，不切回 loading 态，避免队列反复闪回"正在读取..."。
+  const refreshTasks = useCallback(async () => {
+    try {
+      await invoke<Task[]>("recover_interrupted_tasks", { staleAfterSeconds: STALE_TASK_SECONDS });
+      await invoke<Task[]>("sync_pending_analyzed_tasks");
+      const nextTasks = await invoke<Task[]>("list_capture_tasks");
+      setTasks(nextTasks);
+      setQueueError(null);
+      setQueueLoadState("ready");
+    } catch {
+      // 后台刷新失败时保留上一次的成功状态，不打断用户。
+    }
+  }, []);
+
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
 
   const queueRows = useMemo(() => tasks.map(taskToQueueRow), [tasks]);
+
+  // 只要队列里还有进行中的任务，就每 1.2s 从本地 DB 拉一次真实状态：
+  // 后端在 reading/analyzing/syncing 各阶段都会落库，轮询让 UI 状态"完全真实可靠"。
+  const hasProcessingTask = useMemo(
+    () => tasks.some((task) => taskMatchesFilter(task.status, "processing")),
+    [tasks]
+  );
+
+  useEffect(() => {
+    if (!hasProcessingTask) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void refreshTasks();
+    }, 1200);
+
+    return () => window.clearInterval(timer);
+  }, [hasProcessingTask, refreshTasks]);
+
+  const hideToMenuBar = useCallback(async () => {
+    setIsTogglingCompact(true);
+    try {
+      await invoke("set_compact_mode", { compact: true });
+      setQueueError(null);
+    } catch (error) {
+      setQueueError(readableError(error));
+    } finally {
+      setIsTogglingCompact(false);
+    }
+  }, []);
 
   const visibleRows = useMemo(() => {
     const filteredRows = queueFilter === "all"
@@ -291,9 +352,39 @@ function App() {
       setQueueError(readableError(error));
     } finally {
       setRetryingTaskId(null);
-      await loadTasks();
+      await refreshTasks();
     }
-  }, [loadTasks]);
+  }, [refreshTasks]);
+
+  const handleRetryTask = useCallback(async (id: string) => {
+    const task = tasks.find((item) => item.id === id);
+    setRetryingTaskId(id);
+    if (task) {
+      setTasks((currentTasks) =>
+        currentTasks.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                status: item.analysis_json ? "syncing" : "reading",
+                error_kind: null,
+                error_message: null
+              }
+            : item
+        )
+      );
+    }
+
+    try {
+      const updatedTask = await invoke<Task>("retry_capture_task", { id });
+      setTasks((currentTasks) => upsertTask(currentTasks, updatedTask));
+      setQueueError(null);
+    } catch (error) {
+      setQueueError(readableError(error));
+    } finally {
+      setRetryingTaskId(null);
+      await refreshTasks();
+    }
+  }, [refreshTasks, tasks]);
 
   const handleSearchClick = () => {
     const shouldOpen = activeNav !== "queue" || !searchOpen;
@@ -322,7 +413,9 @@ function App() {
       setNote("");
       setTasks((currentTasks) => upsertTask(currentTasks, createdTask));
       setActiveNav("queue");
-      await handleRunTask(createdTask.id);
+      // 分析（读网页 + 调 AI）放后台跑，采集按钮只覆盖"入队"这一步；
+      // 队列页靠轮询实时显示 reading/analyzing/analyzed 真实状态。
+      void handleRunTask(createdTask.id);
     } catch (error) {
       setCaptureError(readableError(error));
     } finally {
@@ -351,6 +444,8 @@ function App() {
         onNavChange={setActiveNav}
         onSearchClick={handleSearchClick}
         searchActive={activeNav === "queue" && searchOpen}
+        onShrink={() => void hideToMenuBar()}
+        shrinkDisabled={isTogglingCompact}
       />
       <section className="app-content">
         {activeNav === "queue" && (
@@ -364,7 +459,7 @@ function App() {
             searchOpen={searchOpen}
             searchTerm={searchTerm}
             onSearchTermChange={setSearchTerm}
-            onRetryTask={handleRunTask}
+            onRetryTask={handleRetryTask}
             retryingTaskId={retryingTaskId}
           />
         )}
@@ -381,6 +476,7 @@ function App() {
             onProviderChange={setSelectedProviderId}
             onSubmit={handleCaptureSubmit}
             onPasteFromClipboard={handlePasteFromClipboard}
+            onOpenSettings={() => setActiveNav("settings")}
           />
         )}
         {activeNav === "templates" && <TemplatesView />}
@@ -401,9 +497,18 @@ interface AppHeaderProps {
   onNavChange: (key: NavKey) => void;
   onSearchClick: () => void;
   searchActive: boolean;
+  onShrink: () => void;
+  shrinkDisabled: boolean;
 }
 
-function AppHeader({ activeNav, onNavChange, onSearchClick, searchActive }: AppHeaderProps) {
+function AppHeader({
+  activeNav,
+  onNavChange,
+  onSearchClick,
+  searchActive,
+  onShrink,
+  shrinkDisabled
+}: AppHeaderProps) {
   return (
     <header className="app-header">
       <div className="brand-block">
@@ -428,14 +533,17 @@ function AppHeader({ activeNav, onNavChange, onSearchClick, searchActive }: AppH
       </nav>
       <div className="header-actions">
         <IconButton label="搜索" active={searchActive} onClick={onSearchClick}>
-          <Search size={30} strokeWidth={2.4} />
+          <Search size={22} strokeWidth={2.15} />
         </IconButton>
         <IconButton
           label="设置"
           active={activeNav === "settings"}
           onClick={() => onNavChange("settings")}
         >
-          <Settings size={28} strokeWidth={2.4} />
+          <Settings2 size={22} strokeWidth={2.1} />
+        </IconButton>
+        <IconButton label="隐藏到系统菜单栏" onClick={onShrink} disabled={shrinkDisabled}>
+          <Minimize2 size={22} strokeWidth={2.05} />
         </IconButton>
       </div>
     </header>
@@ -445,17 +553,19 @@ function AppHeader({ activeNav, onNavChange, onSearchClick, searchActive }: AppH
 interface IconButtonProps {
   label: string;
   active?: boolean;
+  disabled?: boolean;
   onClick?: () => void;
   children: React.ReactNode;
 }
 
-function IconButton({ label, active, onClick, children }: IconButtonProps) {
+function IconButton({ label, active, disabled, onClick, children }: IconButtonProps) {
   return (
     <button
       type="button"
       className={`icon-button ${active ? "active" : ""}`}
       aria-label={label}
       title={label}
+      disabled={disabled}
       onClick={onClick}
     >
       {children}
@@ -552,6 +662,16 @@ function QueueView({
             </span>
             <span className="model-cell">
               <span>{item.model}</span>
+              {item.status === "synced" && item.notionPageId && (
+                <a
+                  className="row-action"
+                  href={notionPageUrl(item.notionPageId)}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Notion
+                </a>
+              )}
               {item.status === "failed" && (
                 <button
                   className="row-action"
@@ -587,7 +707,7 @@ function QueueView({
 
       <div className="soft-banner">
         <BadgeInfo size={24} />
-        <span>本地 SQLite 队列与 Agent-Reach web 读取已启用；当前会先读取文章正文再分析，Notion 同步后续接入。</span>
+        <span>本地 SQLite 队列、Agent-Reach web 读取和 Notion 最小同步已启用；处理中任务超时会恢复为失败并保留可重试入口。</span>
       </div>
     </div>
   );
@@ -652,6 +772,7 @@ interface CaptureViewProps {
   onProviderChange: (providerId: AiProviderId) => void;
   onSubmit: () => void;
   onPasteFromClipboard: () => void;
+  onOpenSettings: () => void;
 }
 
 function CaptureView({
@@ -665,7 +786,8 @@ function CaptureView({
   selectedProviderId,
   onProviderChange,
   onSubmit,
-  onPasteFromClipboard
+  onPasteFromClipboard,
+  onOpenSettings
 }: CaptureViewProps) {
   const hasUrl = url.trim().length > 0;
 
@@ -746,12 +868,12 @@ function CaptureView({
         <div className="notion-card">
           <div className="notion-logo">N</div>
           <div>
-            <strong>Notion 同步未连接</strong>
-            <p>连接后可将生成的研究卡同步到 Notion 数据库。</p>
+            <strong>Notion 同步使用本地配置</strong>
+            <p>在「设置」页配置 Token 和 Database ID 后，研究卡会自动同步。</p>
           </div>
-          <Button className="disabled-connect" isDisabled>
-            连接 Notion
-          </Button>
+          <button className="notion-goto-settings" type="button" onClick={onOpenSettings}>
+            去设置
+          </button>
         </div>
       </section>
 
@@ -908,25 +1030,155 @@ function SettingsView({ selectedProviderId, onProviderChange }: SettingsViewProp
           <em>Agent-Reach web route</em>
         </div>
       </section>
-      <section className="settings-card notion-settings">
-        <div>
-          <h2>3. Notion 连接</h2>
-          <strong>未接入</strong>
-          <p>OAuth 授权与数据库映射功能（计划中）</p>
-        </div>
-        <Button className="disabled-connect" isDisabled>
-          连接 Notion
-        </Button>
-      </section>
+      <NotionSettingsCard />
       <section className="settings-card privacy-card">
         <h2>4. 隐私与存储</h2>
-        <p>本地优先、无中间服务器；OpenAI-compatible API 目前只读取环境变量，凭证未来接入系统钥匙串。</p>
+        <p>本地优先、无中间服务器；Notion Token 保存在本地数据库，OpenAI-compatible API 仍读取环境变量。钥匙串托管后续接入。</p>
       </section>
       <div className="soft-banner settings-note">
         <BadgeInfo size={24} />
-        <span>AI provider 选择已接入当前会话；持久化配置和 keychain 后续接入。</span>
+        <span>AI provider 选择已接入当前会话；Notion 凭证保存在本地配置，无需环境变量。</span>
       </div>
     </div>
+  );
+}
+
+function NotionSettingsCard() {
+  const [loadState, setLoadState] = useState<QueueLoadState>("loading");
+  const [configured, setConfigured] = useState(false);
+  const [tokenPreview, setTokenPreview] = useState<string | null>(null);
+  const [tokenInput, setTokenInput] = useState("");
+  const [databaseId, setDatabaseId] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+
+  const applySettings = (settings: NotionSettingsView) => {
+    setConfigured(settings.configured);
+    setTokenPreview(settings.token_preview);
+    setDatabaseId(settings.database_id);
+  };
+
+  const loadSettings = useCallback(async () => {
+    setLoadState("loading");
+    try {
+      const settings = await invoke<NotionSettingsView>("get_notion_settings");
+      applySettings(settings);
+      setLoadState("ready");
+    } catch (error) {
+      setMessage({ kind: "error", text: readableError(error) });
+      setLoadState("error");
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSettings();
+  }, [loadSettings]);
+
+  const handleSave = async () => {
+    const trimmedDatabaseId = databaseId.trim();
+    if (!trimmedDatabaseId) {
+      setMessage({ kind: "error", text: "请填写 Notion Database ID" });
+      return;
+    }
+
+    setIsSaving(true);
+    setMessage(null);
+    try {
+      const settings = await invoke<NotionSettingsView>("save_notion_settings", {
+        token: tokenInput.trim() ? tokenInput.trim() : null,
+        databaseId: trimmedDatabaseId
+      });
+      applySettings(settings);
+      setTokenInput("");
+      setMessage({ kind: "success", text: "已保存到本地配置" });
+    } catch (error) {
+      setMessage({ kind: "error", text: readableError(error) });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    setIsTesting(true);
+    setMessage(null);
+    try {
+      const result = await invoke<string>("test_notion_connection");
+      setMessage({ kind: "success", text: result });
+    } catch (error) {
+      setMessage({ kind: "error", text: readableError(error) });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  return (
+    <section className="settings-card notion-settings-card">
+      <h2>3. Notion 连接</h2>
+      {loadState === "loading" && <p className="settings-row muted">正在读取本地配置...</p>}
+      {loadState !== "loading" && (
+        <>
+          <label className="field-label" htmlFor="notion-token">
+            Integration Token
+          </label>
+          <div className="input-shell">
+            <input
+              id="notion-token"
+              aria-label="Notion Integration Token"
+              className="input-text"
+              type="password"
+              value={tokenInput}
+              onChange={(event) => setTokenInput(event.currentTarget.value)}
+              placeholder={configured ? `已保存 ${tokenPreview ?? ""}，留空则不修改` : "ntn_..."}
+            />
+          </div>
+
+          <label className="field-label" htmlFor="notion-database-id">
+            Database ID
+          </label>
+          <div className="input-shell">
+            <input
+              id="notion-database-id"
+              aria-label="Notion Database ID"
+              className="input-text"
+              value={databaseId}
+              onChange={(event) => setDatabaseId(event.currentTarget.value)}
+              placeholder="32 位十六进制 database id"
+            />
+          </div>
+
+          <div className="notion-settings-actions">
+            <button
+              className="secondary-action"
+              type="button"
+              disabled={isTesting || !configured}
+              onClick={handleTestConnection}
+            >
+              {isTesting && <Loader2 size={14} className="spin" />}
+              {isTesting ? "测试中..." : "测试连接"}
+            </button>
+            <button
+              className="notion-save-action"
+              type="button"
+              disabled={isSaving || !databaseId.trim()}
+              onClick={handleSave}
+            >
+              {isSaving && <Loader2 size={14} className="spin" />}
+              {isSaving ? "保存中..." : "保存"}
+            </button>
+          </div>
+
+          {message && (
+            <p className={message.kind === "success" ? "field-success" : "field-error"}>
+              {message.text}
+            </p>
+          )}
+          {!configured && !message && (
+            <p className="settings-row muted">尚未配置，保存后才能同步到 Notion，也才能测试连接。</p>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 

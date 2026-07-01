@@ -5,6 +5,7 @@
 use serde::Serialize;
 
 pub mod analysis;
+pub mod notion;
 pub mod task;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

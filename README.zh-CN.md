@@ -11,22 +11,24 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-555.svg">
   <img alt="Built with Tauri 2" src="https://img.shields.io/badge/built%20with-Tauri%202-24C8DB.svg?logo=tauri&logoColor=white">
-  <a href="https://heroui.com"><img alt="UI: HeroUI" src="https://img.shields.io/badge/UI-HeroUI-000.svg?logo=react"></a>
+  <img alt="Frontend: React + Tailwind" src="https://img.shields.io/badge/UI-React%20%2B%20Tailwind-38bdf8.svg?logo=react&logoColor=white">
   <a href="https://github.com/Panniantong/Agent-Reach"><img alt="Powered by Agent-Reach" src="https://img.shields.io/badge/powered%20by-Agent--Reach-0aa.svg?logo=github&logoColor=white"></a>
-  <img alt="Status" src="https://img.shields.io/badge/status-early%20development-orange.svg">
+  <img alt="Status" src="https://img.shields.io/badge/status-alpha-orange.svg">
+  <a href="https://github.com/AliceDel66/ReachNote/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/AliceDel66/ReachNote?include_prereleases&sort=semver"></a>
   <a href="https://github.com/AliceDel66/ReachNote/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/AliceDel66/ReachNote?style=social"></a>
 </p>
 
-> ReachNote 是一款**跨平台（macOS / Windows）桌面端 AI 信息采集工具**。你在浏览 GitHub、网页、视频、RSS 时一键收藏链接，本地 Agent 自动读取内容、调用 AI 总结分析，并写入你绑定的 Notion 数据库，形成一个可持续更新、可检索、可比较的个人研究库。
+> ReachNote 是一款**跨平台（macOS / Windows）桌面端 AI 信息采集工具**。你在浏览 GitHub、网页、视频、RSS 时收藏链接，本地 Agent 自动读取内容、调用 AI 总结分析，并写入你绑定的 Notion 数据库，形成一个可持续更新、可检索、可比较的个人研究库。
 
 > [!NOTE]
-> **项目状态：PRD 重置（Pre-Alpha）。** 2026-06-30 已按用户要求清空旧实现进度。本文档现在只描述产品意图与历史方向；下一轮实现以 [`plans/prds/20260630-1906-reachnote-mvp-reset.prd.md`](plans/prds/20260630-1906-reachnote-mvp-reset.prd.md) 为当前 source of truth。
+> **项目状态：Alpha。** 核心闭环 —— 采集 → 读取 → AI 分析 → 同步 Notion —— 已端到端跑通，配套本地 SQLite 队列与一键重试。部分 P1 能力（Notion OAuth、全局快捷键、模板编辑、系统钥匙串、代码签名）尚未完成，见[路线图](#路线图)。可从 [Releases](https://github.com/AliceDel66/ReachNote/releases) 下载安装包，或从源码运行。
 
 ---
 
 ## 目录
 
 - [ReachNote 是什么](#reachnote-是什么)
+- [下载与安装](#下载与安装)
 - [核心特性](#核心特性)
 - [核心链路](#核心链路)
 - [系统架构](#系统架构)
@@ -57,25 +59,44 @@
 
 ReachNote 把这条链路自动化。它要做的不是「又一个收藏夹」，而是：
 
-> **当我看到一个值得研究的链接时，我不用手动整理 —— 只需一个快捷键，它就自动生成一张结构化的 Notion 研究卡，方便我以后检索、比较和跟进。**
+> **当我看到一个值得研究的链接时，我不用手动整理 —— 一步就把它变成一张结构化的 Notion 研究卡，方便我以后检索、比较和跟进。**
 
 首版聚焦**开发者 / AI 工具研究者**：GitHub 仓库、技术博客、YouTube 教程、RSS 更新是高频且稳定的内容源，输出天然适合落进 Notion database（项目分析、技术栈、价值判断、是否跟进）。
 
 ---
 
+## 下载与安装
+
+预编译安装包发布在 [**Releases**](https://github.com/AliceDel66/ReachNote/releases) 页面，由 GitHub Actions 自动为两个平台构建：
+
+| 平台 | 文件 | 说明 |
+| --- | --- | --- |
+| **macOS**（Apple Silicon + Intel） | `ReachNote_*_universal.dmg` | 一个通用包同时适配两种芯片 |
+| **Windows**（x64） | `ReachNote_*_x64-setup.exe` / `*_x64_en-US.msi` | NSIS 安装器或 MSI |
+
+> [!IMPORTANT]
+> 当前安装包**未签名**（暂无 Apple / 微软证书），首次打开系统会告警，这在 Alpha 阶段属正常：
+> - **macOS** —— 拖入「应用程序」后，右键图标 → **打开** → 再点一次 **打开**；或终端执行 `xattr -dr com.apple.quarantine /Applications/ReachNote.app`。
+> - **Windows** —— SmartScreen 提示时点「**更多信息 → 仍要运行**」。
+
+首次采集前需要**一个 AI 通道**（本地 `claude` / `codex` CLI，或 OpenAI 兼容 API）以及一个 **Notion Integration Token + Database ID**，详见[快速开始](#快速开始)。
+
+---
+
 ## 核心特性
 
-| 特性 | 说明 |
-| --- | --- |
-| 💻 **跨平台桌面** | macOS 与 Windows，系统托盘 / 菜单栏常驻，基于 Tauri，空闲占用低 |
-| 🖱️ **一键捕获** | 剪贴板 URL、手动粘贴、全局快捷键（规划中） |
-| 🌐 **多源读取** | 通过 [Agent-Reach](https://github.com/Panniantong/Agent-Reach) 读取 GitHub / 网页 / YouTube 字幕 / RSS，正文提取 + 去噪 |
-| 🤖 **AI 模板化分析** | 不只是摘要，而是按内容类型输出结构化字段：定位、技术栈、关键观点、价值评分、下一步建议 |
-| 🔌 **三种 AI Provider** | 本地 **Claude CLI** / 本地 **Codex CLI** / 任意 **OpenAI 兼容 API**，自带算力、自带 Key |
-| 🗂️ **直写 Notion** | OAuth 授权，自动映射字段并写入你选定的 database |
-| 🔁 **本地队列与重试** | 任务持久化在本地，失败原因人类可读、可一键重试 |
-| 🔐 **本地优先 / 隐私友好** | 内容只流经「你的机器 → 你选的 AI → 你的 Notion」，无中间服务器 |
-| 🆓 **开源 / BYOK** | MIT 协议，无云端账号、无订阅，自带 Key 即用 |
+| 特性 | 状态 | 说明 |
+| --- | --- | --- |
+| 💻 **跨平台桌面** | ✅ | macOS 与 Windows，基于 Tauri 2，空闲占用低；支持「收进菜单栏」紧凑模式 |
+| 🖱️ **一步捕获** | ✅ | 粘贴 URL 或从剪贴板一键读取；每次采集可附加备注 |
+| 🌐 **网页 / 文章读取** | ✅ | 通过 [Agent-Reach](https://github.com/Panniantong/Agent-Reach) 的 web 路由（Jina Reader）读取正文，带来源识别 |
+| 🤖 **结构化 AI 分析** | ✅ | 不只是摘要 —— 标题、摘要、关键要点、标签、价值评分、下一步，输出经 JSON 校验 |
+| 🔌 **三种 AI Provider** | ✅ | 本地 **Claude CLI** / 本地 **Codex CLI** / 任意 **OpenAI 兼容 API**，自带算力、自带 Key |
+| 🗂️ **直写 Notion** | ✅ | Integration Token + Database ID，自动映射字段，成功后回链页面 |
+| 🔁 **本地队列与重试** | ✅ | 任务持久化在 SQLite；状态实时轮询；超时任务恢复为可重试的失败 |
+| 🔐 **本地优先 / 隐私友好** | ✅ | 内容只流经「你的机器 → 你选的 AI → 你的 Notion」，无中间服务器 |
+| ⌨️ **全局快捷键 / 剪贴板自动识别** | 🚧 | 规划中（P1） |
+| 🔑 **Notion OAuth + 系统钥匙串** | 🚧 | 规划中；当前 Token 手动填写并存于本地 |
 
 ---
 
@@ -92,17 +113,17 @@ flowchart LR
     classDef sync fill:#047857,stroke:#a7f3d0,stroke-width:2px,color:#fff
 
     URL((URL)):::io
-    URL --> Capture(["1 · Capture<br/>Clipboard / Hotkey / Manual"]):::capture
-    Capture --> Detect(["2 · Detect Source<br/>GitHub · Web · Video · RSS"]):::capture
-    Detect --> Read(["3 · Read<br/>via Agent-Reach"]):::read
-    Read --> Clean(["4 · Clean<br/>Extract · Denoise"]):::read
-    Clean --> Analyze(["5 · Analyze<br/>AI Template"]):::ai
-    Analyze --> Map(["6 · Map<br/>Notion Fields"]):::sync
-    Map --> Sync(["7 · Sync<br/>Write to Notion"]):::sync
-    Sync --> Done((Done)):::sync
+    URL --> Capture(["1 · 采集<br/>剪贴板 / 手动"]):::capture
+    Capture --> Detect(["2 · 识别来源<br/>GitHub · 网页"]):::capture
+    Detect --> Read(["3 · 读取<br/>via Agent-Reach"]):::read
+    Read --> Clean(["4 · 清洗<br/>提取 · 去噪"]):::read
+    Clean --> Analyze(["5 · 分析<br/>AI Provider"]):::ai
+    Analyze --> Map(["6 · 映射<br/>Notion 字段"]):::sync
+    Map --> Sync(["7 · 同步<br/>写入 Notion"]):::sync
+    Sync --> Done((完成)):::sync
 ```
 
-> 设计原则：核心不是「能抓多少平台」，而是 `GitHub / 网页 / YouTube → AI 模板 → Notion database` 这条闭环每一条都稳。
+> 设计原则：核心不是「能抓多少平台」，而是 `链接 → AI 分析 → Notion database` 这条闭环每一条都稳。
 
 ---
 
@@ -117,24 +138,24 @@ flowchart TB
     classDef cap fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
     classDef ext fill:#374151,stroke:#d1d5db,stroke-width:2px,color:#fff
 
-    subgraph UI["Desktop · Tauri + React + HeroUI (macOS / Windows)"]
+    subgraph UI["Desktop · Tauri + React (macOS / Windows)"]
         direction LR
-        Menu(["Menu Bar / Tray"]):::ui ~~~ History(["History / Queue"]):::ui ~~~ Detail(["Capture Detail"]):::ui ~~~ Settings(["Settings"]):::ui
+        Menu(["菜单栏 / 紧凑"]):::ui ~~~ History(["队列 / 历史"]):::ui ~~~ Detail(["采集"]):::ui ~~~ Settings(["设置"]):::ui
     end
 
     subgraph Core["Core Engine · Rust (reachnote-core)"]
         direction LR
-        CaptureSvc(["Capture Service"]):::core --> Queue(["Task Queue<br/>SQLite · Retry"]):::core --> Tmpl(["Template Engine"]):::core --> Mapper(["Notion Mapper"]):::core
+        CaptureSvc(["任务模型"]):::core --> Queue(["SQLite 队列<br/>重试 · 恢复"]):::core --> Tmpl(["分析解析"]):::core --> Mapper(["Notion 映射"]):::core
     end
 
-    subgraph Cap["Capabilities · Subprocess / HTTP"]
+    subgraph Cap["Capabilities · 子进程 / HTTP (src-tauri)"]
         direction LR
-        Reach(["Agent-Reach<br/>spawn agent-reach"]):::cap ~~~ AIRouter(["AI Provider<br/>Router"]):::cap ~~~ NotionSync(["Notion Sync"]):::cap
+        Reach(["Reader<br/>Agent-Reach web"]):::cap ~~~ AIRouter(["AI Provider<br/>路由"]):::cap ~~~ NotionSync(["Notion 同步"]):::cap
     end
 
     subgraph Ext["External Services"]
         direction LR
-        Sites(["GitHub · Web<br/>YouTube · RSS"]):::ext ~~~ AIBackends(["Claude CLI · Codex CLI<br/>OpenAI-compatible API"]):::ext ~~~ NotionDB[("Notion Database")]:::ext
+        Sites(["GitHub · 网页"]):::ext ~~~ AIBackends(["Claude CLI · Codex CLI<br/>OpenAI-compatible API"]):::ext ~~~ NotionDB[("Notion Database")]:::ext
     end
 
     UI ==> Core ==> Cap ==> Ext
@@ -145,9 +166,9 @@ flowchart TB
     style Ext fill:none,stroke:#9ca3af,stroke-width:2px,stroke-dasharray:5 5,color:#9ca3af
 ```
 
-- **桌面层**（Tauri + React + HeroUI）：菜单栏 / 托盘、History / Queue、Capture Detail、Settings。首屏直接展示 History / Queue。
-- **核心引擎**（Rust）：本地任务编排。捕获服务接单 → 队列持久化与重试 → 模板引擎组装 prompt → Notion 映射器对齐字段。
-- **能力层**：三个对外适配器 —— Agent-Reach（spawn `agent-reach` 读内容）、AI Provider 路由（做分析）、Notion Sync（写卡片）。
+- **桌面层**（Tauri 2 + React 18 + Tailwind CSS）：队列（首屏）、采集、模板、设置，外加「收进菜单栏」紧凑模式。
+- **核心引擎**（`crates/core`，Rust）：纯逻辑 —— 任务模型与状态、分析 JSON 解析与校验、Notion 字段映射，均带单测。
+- **能力层**（`src-tauri`）：三个对外适配器 —— Reader（Agent-Reach web 路由）、AI Provider 路由（Claude / Codex / OpenAI 兼容）、Notion 同步，以及 SQLite 存储与 Tauri 命令。
 - **外部服务**：内容源、AI 后端、你的 Notion 数据库，全部由你掌控。
 
 ---
@@ -164,46 +185,46 @@ flowchart TB
     classDef api fill:#1e40af,stroke:#bfdbfe,stroke-width:2px,color:#fff
     classDef out fill:#047857,stroke:#a7f3d0,stroke-width:2px,color:#fff
 
-    Req(["Content + Template Prompt"]):::io
-    Req --> Router{{"AI Provider Router<br/>reads user config"}}:::router
+    Req(["内容 + Prompt"]):::io
+    Req --> Router{{"AI Provider 路由<br/>读取你的选择"}}:::router
 
-    Router -->|Local CLI| Claude(["Claude CLI<br/>claude -p"]):::local
-    Router -->|Local CLI| Codex(["Codex CLI<br/>codex exec"]):::local
-    Router -->|HTTP API| OpenAI(["OpenAI-compatible API<br/>base_url + key + model"]):::api
+    Router -->|本地 CLI| Claude(["Claude CLI<br/>claude -p"]):::local
+    Router -->|本地 CLI| Codex(["Codex CLI<br/>codex exec"]):::local
+    Router -->|HTTP API| OpenAI(["OpenAI-compatible API<br/>REACHNOTE_OPENAI_*"]):::api
 
-    Claude --> Parse(["Parse · Validate<br/>JSON Schema"]):::out
+    Claude --> Parse(["解析 · 校验<br/>JSON"]):::out
     Codex --> Parse
     OpenAI --> Parse
 
-    Parse --> Result(["Structured Result<br/>Summary · Key Points<br/>Tags · Score · Next Action"]):::out
+    Parse --> Result(["结构化研究卡<br/>摘要 · 要点<br/>标签 · 评分 · 下一步"]):::out
 ```
 
 | Provider | 调用方式 | 适合场景 | 你需要准备 |
 | --- | --- | --- | --- |
-| **Claude CLI** | 本地子进程 `claude -p` | 已在用 Claude Code，想复用登录态与额度 | 安装并登录 [Claude Code CLI](https://claude.com/claude-code) |
+| **Claude CLI**（默认） | 本地子进程 `claude` | 已在用 Claude Code，想复用登录态与额度 | 安装并登录 [Claude Code CLI](https://claude.com/claude-code) |
 | **Codex CLI** | 本地子进程 `codex exec` | 已在用 OpenAI Codex CLI | 安装并登录 [Codex CLI](https://github.com/openai/codex) |
-| **OpenAI 兼容 API** | HTTP 请求 | 直连官方 / 代理 / 本地推理 | `base_url` + `api_key` + `model` |
+| **OpenAI 兼容 API** | HTTP 请求 | 直连官方 / 代理 / 本地推理 | `REACHNOTE_OPENAI_BASE_URL` + `REACHNOTE_OPENAI_API_KEY` + `REACHNOTE_OPENAI_MODEL` |
 
 > **为什么支持本地 CLI？** 很多开发者已经装好并登录了 Claude / Codex CLI。ReachNote 直接以子进程方式复用它们，你**无需再单独配置 API Key**，内容也不经第三方中转。OpenAI 兼容模式覆盖其余场景 —— 包括指向本地推理（Ollama `http://localhost:11434/v1`、LM Studio `http://localhost:1234/v1`）实现完全离线。
 
-无论走哪条路，ReachNote 都向模型请求**同一套结构化输出**，并按 JSON Schema 校验，确保稳定映射到 Notion 字段。配置示例见 [配置说明](#配置说明)。
+无论走哪条路，ReachNote 都向模型请求**同一套结构化输出**，解析后再校验，确保稳定映射到 Notion 字段。
 
 ---
 
 ## 捕获方式
 
-| 方式 | 说明 | 优先级 |
+| 方式 | 说明 | 状态 |
 | --- | --- | --- |
-| 📋 剪贴板 URL | 识别剪贴板里的链接，一键捕获 | P0 |
-| ⌨️ 手动粘贴 | 在弹窗里粘贴任意 URL | P0 |
-| 🔥 全局快捷键 | 任意 App 下按快捷键捕获 | P1 |
-| 🌍 当前浏览器 URL | 抓取前台浏览器正在浏览的页面 | P1 |
+| ⌨️ 手动粘贴 | 粘贴任意 http(s) 文章 URL，可附加备注 | ✅ P0 |
+| 📋 剪贴板按钮 | 从剪贴板一键读取 URL | ✅ P0 |
+| 🔥 全局快捷键 | 任意 App 下按快捷键捕获 | 🚧 P1 |
+| 🌍 当前浏览器 URL | 抓取前台浏览器正在浏览的页面 | 🚧 P1 |
 
 ---
 
 ## 任务生命周期
 
-每个捕获任务在本地队列中按下列状态流转。**失败不会静默丢弃**，错误可读、可一键重试：
+每个采集任务在本地队列中按下列状态流转。**失败不会静默丢弃** —— 错误可读、可一键重试；卡在处理态超过超时的任务会被恢复为 `失败`：
 
 ```mermaid
 flowchart LR
@@ -212,74 +233,74 @@ flowchart LR
     classDef ok fill:#047857,stroke:#a7f3d0,stroke-width:2px,color:#fff
     classDef bad fill:#b91c1c,stroke:#fecaca,stroke-width:2px,color:#fff
 
-    Start((Capture)):::st
-    Start --> Queued(["Queued"]):::st
-    Queued --> Reading(["Reading"]):::work
-    Reading --> Analyzing(["Analyzing"]):::work
-    Analyzing --> Syncing(["Syncing"]):::work
-    Syncing --> Synced(["Synced OK"]):::ok
+    Start((采集)):::st
+    Start --> Queued(["排队中"]):::st
+    Queued --> Reading(["读取中"]):::work
+    Reading --> Analyzing(["分析中"]):::work
+    Analyzing --> Analyzed(["已分析"]):::work
+    Analyzed --> Syncing(["同步中"]):::work
+    Syncing --> Synced(["已完成"]):::ok
 
-    Reading -. fail .-> Failed(["Failed<br/>visible error"]):::bad
-    Analyzing -. fail .-> Failed
-    Syncing -. fail .-> Failed
-    Failed -. Retry .-> Queued
+    Reading -. 失败 .-> Failed(["失败<br/>错误可见"]):::bad
+    Analyzing -. 失败 .-> Failed
+    Syncing -. 失败 .-> Failed
+    Failed -. 重试 .-> Queued
 ```
 
-> 区分两套状态：上图是 **应用内任务处理状态**；写入 Notion 后，研究卡还有一套**内容生命周期状态**（`Inbox / Reviewing / Follow-up / Archived`），由你在 Notion 里手动推进。
+> 采集提交在任务入队后立即返回；读取 + AI 分析在后台跑，队列每 ~1.2s 从本地 DB 轮询，状态始终真实。配置好 Notion 连接后，`已分析` 的任务会在下次队列刷新时自动同步。
 
 ---
 
 ## 技术栈
 
-技术选型已定板（跨平台 + 常驻 + 指定 HeroUI 三个约束共同决定）：
-
 | 层 | 选型 |
 | --- | --- |
 | 应用外壳 | **Tauri 2**（跨平台 macOS / Windows） |
 | 前端 | **React 18** + TypeScript + Vite |
-| UI 组件 | **HeroUI** + Tailwind CSS |
-| 核心后端 | **Rust**（`reachnote-core`，待重建） |
-| 持久化 | SQLite |
-| 凭证存储 | 操作系统钥匙串（keyring） |
-| 分发 | Tauri bundler → `.dmg` / `.msi` |
+| 样式 | **Tailwind CSS v4** + `lucide-react` 图标（自研组件） |
+| 核心后端 | **Rust**（`reachnote-core`，带单测） |
+| 持久化 | **SQLite**（`rusqlite`，bundled） |
+| AI / 读取 | 子进程（`claude` / `codex` / `agent-reach`）+ HTTP（`reqwest`） |
+| 分发 | Tauri bundler → `.dmg`（macOS）/ `.exe` + `.msi`（Windows） |
 
-> **为什么是 Tauri 而非 Electron**：ReachNote 是常驻托盘应用，对空闲内存敏感。Tauri 复用系统 WebView（macOS WKWebView / Windows WebView2），常驻进程比每个 app 自带 Chromium 的 Electron 轻得多。**前端锁定 React** 是因为 HeroUI 是 React 组件库。AI 与内容读取均通过 Rust 编排子进程（`agent-reach` / `claude` / `codex`）与 HTTP 实现。
+> **为什么是 Tauri 而非 Electron**：ReachNote 是常驻、可收进菜单栏的应用，对空闲内存敏感。Tauri 复用系统 WebView（macOS WKWebView / Windows WebView2），常驻进程比每个 app 自带 Chromium 的 Electron 轻得多。AI 与内容读取均通过 Rust 编排子进程与 HTTP 实现。
 
 ---
 
-## 目标项目结构
-
-2026-06-30 已清空旧实现。下面是 PRD 确认后需要重新建立的目标结构。
+## 项目结构
 
 ```text
 rearchnote/
-├─ crates/core/        # reachnote-core：纯逻辑核心（重建后补单测）
-│  └─ src/
-│     ├─ ai/           # AI Provider 抽象：claude-cli / codex-cli / openai-api + 结构化解析
-│     └─ reach.rs      # 封装对 Agent-Reach CLI 的调用
-├─ src-tauri/          # Tauri 应用外壳：capture command、托盘、持久化
-├─ src/                # React + HeroUI 前端（队列优先桌面 UI）
-├─ Cargo.toml          # Rust workspace
-└─ package.json        # 前端依赖 + Tauri CLI
+├─ crates/core/src/          # reachnote-core：纯逻辑，带单测
+│  ├─ analysis.rs            # 解析/校验 AI 输出 → 结构化研究卡
+│  ├─ notion.rs              # Notion 字段映射
+│  ├─ task.rs                # 任务模型与生命周期状态
+│  └─ lib.rs
+├─ src-tauri/src/            # Tauri 外壳 + 能力层
+│  ├─ lib.rs                 # Tauri 命令与应用装配
+│  ├─ provider.rs            # AI Provider：claude-cli / codex-cli / openai-compatible
+│  ├─ reader.rs              # Agent-Reach / 网页读取
+│  ├─ notion.rs              # Notion HTTP 同步
+│  └─ store.rs               # SQLite 任务队列 + 设置
+├─ src/                      # React + Tailwind 前端（队列优先）
+│  └─ App.tsx
+├─ .github/workflows/        # release.yml —— macOS + Windows 安装包 CI
+├─ Cargo.toml                # Rust workspace（crates/core + src-tauri）
+└─ package.json              # 前端依赖 + Tauri CLI
 ```
 
 ---
 
 ## 快速开始
 
-> [!IMPORTANT]
-> PRD 重置阶段。旧的可运行实现已清空，当前没有可直接运行的 app scaffold；后续重建应从 [`plans/prds/20260630-1906-reachnote-mvp-reset.prd.md`](plans/prds/20260630-1906-reachnote-mvp-reset.prd.md) 开始。
-
 ### 环境要求
 
-- **Rust**（stable）与 **Node 18+** / **pnpm**
-- 至少一种 AI Provider：本地 `claude` / `codex` CLI，或一个 OpenAI 兼容 API 的 `base_url` + `api_key`
-- 内容读取：[Agent-Reach](https://github.com/Panniantong/Agent-Reach)（`agent-reach` CLI；Windows 需 Python 运行时）
-- 一个 Notion 账号（写入用，开发中）
+- **Rust**（stable）与 **Node 18+** + **pnpm**
+- 至少一种 AI Provider：本地 `claude` / `codex` CLI，或一个 OpenAI 兼容 API（`REACHNOTE_OPENAI_*`）
+- 内容读取：`PATH` 上可用的 [Agent-Reach](https://github.com/Panniantong/Agent-Reach)（`agent-reach` CLI）
+- 一个 Notion **内部集成（internal integration）**（写入用）
 
-### 运行
-
-PRD 确认并重新建立 Tauri/React/Rust 脚手架后，目标命令是：
+### 从源码运行
 
 ```bash
 git clone git@github.com:AliceDel66/ReachNote.git
@@ -288,117 +309,112 @@ pnpm install
 pnpm tauri dev
 ```
 
-### 首次配置（Onboarding）
+### 构建安装包
 
-目标：**2 分钟内完成第一次可用闭环。**
+```bash
+pnpm tauri build        # 为当前系统本地构建
+```
+
+或推送一个 `v*` 标签 —— [`release.yml`](.github/workflows/release.yml) 工作流会构建 macOS（通用）与 Windows 安装包并附加到 GitHub Release。
+
+### 首次配置
+
+目标：**几分钟内完成第一次可用闭环。**
 
 ```mermaid
 flowchart LR
     classDef step fill:#5b21b6,stroke:#ddd6fe,stroke-width:2px,color:#fff
     classDef done fill:#047857,stroke:#a7f3d0,stroke-width:2px,color:#fff
 
-    A(["1 · Connect Notion<br/>OAuth"]):::step
-    A --> B(["2 · Select / Create<br/>Database"]):::step
-    B --> C(["3 · Configure AI Provider<br/>Claude / Codex / API"]):::step
-    C --> D(["4 · Agent-Reach<br/>Doctor"]):::step
-    D --> E(["5 · Test Capture"]):::step
-    E --> F((Done)):::done
+    A(["1 · 创建 Notion<br/>internal integration"]):::step
+    A --> B(["2 · 共享数据库 +<br/>填 Token / DB ID"]):::step
+    B --> C(["3 · 选 AI Provider<br/>Claude / Codex / API"]):::step
+    C --> D(["4 · 测试 Notion<br/>连接"]):::step
+    D --> E(["5 · 采集一个 URL"]):::step
+    E --> F((完成)):::done
 ```
 
-1. **连接 Notion** —— OAuth 授权访问目标 workspace。
-2. **选择或创建 Database** —— 选已有库，或一键创建默认的 `ReachNote Research Inbox`。
-3. **配置 AI Provider** —— 三选一。
-4. **运行 Agent-Reach Doctor** —— 即 `agent-reach doctor`，体检读取渠道。
-5. **测试一次 Capture** —— 收一条 GitHub repo，确认整条链路通畅。
+1. **创建 Notion 内部集成** —— <https://www.notion.so/my-integrations> → 复制 *Internal Integration Secret*（`ntn_...`）。
+2. **把目标数据库共享给该集成**，然后在 ReachNote → 设置里粘贴 **Token** 与 **Database ID** 并保存。
+3. **选择 AI Provider** —— Claude CLI（默认）、Codex CLI，或 OpenAI 兼容。
+4. **在设置里测试 Notion 连接**。
+5. **采集一个 URL** —— 粘贴一条文章链接，确认整条链路（读取 → 分析 → 同步）跑通。
 
 ---
 
 ## 配置说明
 
-> 以下为**设计中的配置形态**（拟定路径 `~/.reachnote/config.toml`）。多数用户可在 Settings 界面完成，无需手写。
+大多数配置都在应用内 **设置** 页完成，无需手写文件：
 
-```toml
-[ai]
-# 三选一：claude-cli | codex-cli | openai-api
-provider = "claude-cli"
+- **AI Provider** —— 每次采集时选择 / 在设置里切换（`claude_cli` · `codex_cli` · `openai_compatible`）。
+- **Notion** —— Integration Token + Database ID，保存在本地存储（钥匙串托管规划中）。
+- **OpenAI 兼容** —— 当前从环境变量读取：
 
-[ai.claude-cli]
-command = "claude"        # 复用已登录的 Claude Code
-
-[ai.codex-cli]
-command = "codex"
-
-[ai.openai-api]
-base_url = "https://api.openai.com/v1"   # 本地推理改为 http://localhost:11434/v1 等
-api_key  = "sk-..."
-model    = "gpt-4o-mini"
-
-[reach]
-command = "agent-reach"   # Agent-Reach CLI
-sources = ["github", "web", "youtube", "rss"]
-
-[notion]
-# 由 OAuth 流程自动写入
-database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-default_template = "github-project"
+```bash
+export REACHNOTE_OPENAI_BASE_URL="https://api.openai.com/v1"   # 或 http://localhost:11434/v1
+export REACHNOTE_OPENAI_API_KEY="sk-..."
+export REACHNOTE_OPENAI_MODEL="gpt-4o-mini"
 ```
+
+> 切勿提交真实 Token。`.env*` 文件已被 gitignore；Notion 自检模板见 `.env.notion.example`。
 
 ---
 
 ## Notion 数据库结构
 
-默认 database：**`ReachNote Research Inbox`**
+把 ReachNote 指向一个字段与下表匹配的数据库。同步时会写入这 **13 个属性**（名称与类型需一致）：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `Title` | Title | 内容标题 |
 | `URL` | URL | 原始链接 |
-| `Source Type` | Select | `GitHub` / `Article` / `Video` / `RSS` / `Social` |
+| `Source Type` | Select | `GitHub` / `Article` / … |
 | `Summary` | Text | AI 摘要 |
-| `Key Points` | Text | 关键观点 |
+| `Key Points` | Text | 关键要点（换行拼接） |
 | `Tags` | Multi-select | 自动打标 |
-| `Status` | Select | `Inbox` / `Reviewing` / `Follow-up` / `Archived` |
-| `Score` | Number | 价值评分（0-100） |
-| `Captured At` | Date | 捕获时间 |
+| `Status` | Select | 写入时置为 `Inbox`，之后手动推进 |
+| `Score` | Number | 价值评分 `0–100`（由 1–5 星 ×20 得到） |
+| `Captured At` | Date | 采集时间 |
 | `Synced At` | Date | 写入时间 |
 | `AI Model` | Text | 实际使用的模型 / Provider |
 | `Template` | Select | 使用的分析模板 |
-| `Raw Content` | Text | 清洗后的原文 |
 | `Next Action` | Text | 下一步建议 |
+
+> 默认 database 为 **`ReachNote Research Inbox`**。`Status` 同时充当你手动维护的内容生命周期（`Inbox` / `Reviewing` / `Follow-up` / `Archived`）。
 
 ---
 
 ## 内置 AI 模板
 
-模板决定 AI 输出的结构。首版内置 4 个，按来源自动选择，也可手动指定（P1）：
+模板决定 AI 输出的结构。首版以 **文章精读** 为可用预览，其余在「模板」页作为方向展示（编辑 / 选择为 P1）：
 
-| 模板 | 适用来源 | 输出字段 |
-| --- | --- | --- |
-| **GitHub 项目分析** | GitHub repo | 项目定位 · 核心功能 · 技术栈 · 适用场景 · 亮点 · 风险 · 是否值得跟进 |
-| **文章精读** | 博客 / 网页 | 一句话摘要 · 关键观点 · 证据 · 可复用结论 · 标签 |
-| **视频笔记** | YouTube 字幕 | 主题 · 章节摘要 · 关键观点 · 行动项 · 适合谁看 |
-| **RSS Brief** | RSS / 订阅 | 更新摘要 · 为什么值得看 · 归类标签 · 是否需要后续阅读 |
+| 模板 | 适用来源 | 输出字段 | 状态 |
+| --- | --- | --- | --- |
+| **文章精读** | 博客 / 网页 | 摘要 · 关键要点 · 标签 · 评分 · 下一步 | ✅ 预览 |
+| **GitHub 项目分析** | GitHub repo | 定位 · 技术栈 · 亮点 · 风险 | 🚧 计划中 |
+| **视频笔记** | YouTube 字幕 | 主题 · 关键要点 · 片段 | 🚧 计划中 |
+| **RSS Brief** | RSS / 订阅 | 更新摘要 · 为什么值得看 · 标签 | 🚧 计划中 |
 
 ---
 
 ## 路线图
 
-### P0 — MVP 闭环
+### P0 — MVP 闭环 ✅
 
 - [x] AI Provider 抽象（Claude CLI / Codex CLI / OpenAI 兼容 API）+ 单元测试
-- [x] 来源识别与模板路由
-- [ ] Notion OAuth 绑定 + Database 选择 / 创建
-- [ ] 手动 / 剪贴板 URL 捕获
-- [ ] Agent-Reach 读取接入（对齐真实子命令）
-- [ ] Notion 写入
-- [ ] 本地任务队列与失败重试
+- [x] 来源识别（GitHub / 网页）与分析解析
+- [x] 手动 / 剪贴板按钮 URL 采集
+- [x] Agent-Reach 读取（web 路由 / Jina Reader）
+- [x] Notion 写入（Integration Token + Database ID，最小同步）
+- [x] 本地任务队列 + 失败重试 + 超时恢复
 
 ### P1 — 体验增强
 
-- [ ] 全局快捷键 / 当前浏览器 URL 捕获
-- [ ] 模板选择
-- [ ] Agent-Reach Doctor 可视化
-- [ ] 批量处理
+- [ ] Notion OAuth（替换手动 Token）+ 系统钥匙串凭证存储
+- [ ] 全局快捷键 / 当前浏览器 URL / 剪贴板自动识别
+- [ ] 模板选择 + 按来源路由
+- [ ] 在设置界面配置 OpenAI 兼容 API（当前走环境变量）
+- [ ] 代码签名 / 公证，产出已签名安装包
 
 ### P2 — 持续监控
 
@@ -416,7 +432,7 @@ default_template = "github-project"
 ReachNote 是**本地优先**的开源工具，没有云端账号，也没有 ReachNote 自己的服务器。
 
 - **内容只流经三方：** 你的机器 → 你选的 AI Provider → 你的 Notion。中间无第三方中转。
-- **自带 Key（BYOK）：** API Key 与 Notion 凭证存在本地操作系统钥匙串，不上传。
+- **自带 Key（BYOK）：** Notion 与 API 凭证留在本地（当前为本地存储，钥匙串托管规划中），不上传。
 - **可完全离线：** 选择本地 CLI 或本地推理（Ollama / LM Studio）时，内容不出本机。
 - **失败可见：** 任务与错误都落在本地，绝不静默丢弃。
 
@@ -426,9 +442,9 @@ ReachNote 是**本地优先**的开源工具，没有云端账号，也没有 Re
 
 ReachNote 站在这些项目的肩膀上：
 
-- **[Agent-Reach](https://github.com/Panniantong/Agent-Reach)** —— 跨平台内容读取层，ReachNote 通过它"看见互联网"（GitHub / 网页 / YouTube / RSS 等）。
-- **[HeroUI](https://heroui.com)** —— React UI 组件库。
+- **[Agent-Reach](https://github.com/Panniantong/Agent-Reach)** —— 跨平台内容读取层，ReachNote 通过它「看见互联网」。
 - **[Tauri](https://tauri.app)** —— 跨平台桌面外壳。
+- **[React](https://react.dev)** + **[Tailwind CSS](https://tailwindcss.com)** + **[lucide](https://lucide.dev)** —— 前端。
 
 ---
 
@@ -438,13 +454,13 @@ ReachNote 处于早期阶段，**正是参与塑造它的最佳时机**。
 
 - 💡 想法 / 用例 / 内容源需求 → 开 [Discussion](https://github.com/AliceDel66/ReachNote/discussions)
 - 🐛 问题 / 设计漏洞 → 提 [Issue](https://github.com/AliceDel66/ReachNote/issues)
-- 🔧 想写代码 → 关注路线图 P0，欢迎认领
+- 🔧 想写代码 → 关注路线图 P1，欢迎认领
 
 ---
 
 ## License
 
-本项目计划以 **[MIT License](LICENSE)** 开源 —— 无商业化计划，自由使用、修改、分发。
+本项目以 **[MIT License](LICENSE)** 开源 —— 自由使用、修改、分发。
 
 ---
 

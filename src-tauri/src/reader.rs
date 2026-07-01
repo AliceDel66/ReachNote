@@ -2,6 +2,8 @@ use std::env;
 use std::time::Duration;
 
 use reachnote_core::task::ErrorKind;
+use reqwest::header::{ACCEPT, USER_AGENT};
+use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadContent {
@@ -40,6 +42,10 @@ impl AgentReachWebReader {
     }
 
     pub fn read_article(&self, url: &str) -> Result<ReadContent, ReaderError> {
+        if github_repo_from_url(url).is_some() {
+            return read_github_repository(url, self.timeout);
+        }
+
         let endpoint = reader_endpoint(&self.base_url, url);
         let client = reqwest::blocking::Client::builder()
             .timeout(self.timeout)
@@ -80,6 +86,154 @@ impl AgentReachWebReader {
 
 fn reader_endpoint(base_url: &str, url: &str) -> String {
     format!("{}/{}", base_url.trim_end_matches('/'), url.trim())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GitHubRepo {
+    owner: String,
+    repo: String,
+}
+
+fn github_repo_from_url(url: &str) -> Option<GitHubRepo> {
+    let (_, rest) = url.trim().split_once("://")?;
+    let path_start = rest.find('/')?;
+    let host = rest[..path_start]
+        .split('@')
+        .next_back()?
+        .to_ascii_lowercase();
+    if host.split(':').next()? != "github.com" {
+        return None;
+    }
+
+    let path = &rest[path_start + 1..];
+    let mut parts = path
+        .split(['/', '?', '#'])
+        .filter(|part| !part.trim().is_empty());
+    let owner = parts.next()?.trim();
+    let repo = parts.next()?.trim().trim_end_matches(".git");
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+
+    Some(GitHubRepo {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+    })
+}
+
+fn read_github_repository(url: &str, timeout: Duration) -> Result<ReadContent, ReaderError> {
+    let repo = github_repo_from_url(url).ok_or_else(|| ReaderError {
+        kind: ErrorKind::InvalidUrl,
+        message: "不是合法的 GitHub repo URL".to_string(),
+    })?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(|error| ReaderError {
+            kind: ErrorKind::NetworkFailed,
+            message: format!("GitHub reader 初始化失败: {error}"),
+        })?;
+    let api_base = github_api_base_url();
+    let repo_endpoint = format!("{}/repos/{}/{}", api_base, repo.owner, repo.repo);
+    let repo_body = github_get_text(&client, &repo_endpoint, "application/vnd.github+json")?;
+    let metadata: Value = serde_json::from_str(&repo_body).map_err(|error| ReaderError {
+        kind: ErrorKind::ParseFailed,
+        message: format!("GitHub repo metadata 不是合法 JSON: {error}"),
+    })?;
+    let default_branch = metadata
+        .get("default_branch")
+        .and_then(Value::as_str)
+        .unwrap_or("main");
+    let description = metadata
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let language = metadata
+        .get("language")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let stars = metadata
+        .get("stargazers_count")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let topics = metadata
+        .get("topics")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "-".to_string());
+
+    let readme_endpoint = format!(
+        "{}/repos/{}/{}/readme?ref={}",
+        api_base, repo.owner, repo.repo, default_branch
+    );
+    let readme = github_get_text(&client, &readme_endpoint, "application/vnd.github.raw")
+        .unwrap_or_else(|error| format!("README 读取失败: {}", error.message));
+    let text = format!(
+        "# GitHub Repository: {}/{}\n\nURL: {}\nDescription: {}\nDefault branch: {}\nLanguage: {}\nStars: {}\nTopics: {}\n\n## README\n\n{}",
+        repo.owner,
+        repo.repo,
+        url.trim(),
+        description,
+        default_branch,
+        language,
+        stars,
+        topics,
+        readme.trim()
+    );
+
+    Ok(ReadContent {
+        reader: "GitHub API / README".to_string(),
+        text,
+    })
+}
+
+fn github_api_base_url() -> String {
+    env::var("REACHNOTE_GITHUB_API_BASE_URL")
+        .ok()
+        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "https://api.github.com".to_string())
+}
+
+fn github_get_text(
+    client: &reqwest::blocking::Client,
+    endpoint: &str,
+    accept: &str,
+) -> Result<String, ReaderError> {
+    let response = client
+        .get(endpoint)
+        .header(USER_AGENT, "ReachNote")
+        .header(ACCEPT, accept)
+        .send()
+        .map_err(|error| ReaderError {
+            kind: ErrorKind::NetworkFailed,
+            message: format!("GitHub reader 请求失败: {error}"),
+        })?;
+    let status = response.status();
+    let body = response.text().map_err(|error| ReaderError {
+        kind: ErrorKind::NetworkFailed,
+        message: format!("GitHub reader 响应读取失败: {error}"),
+    })?;
+
+    if !status.is_success() {
+        return Err(ReaderError {
+            kind: ErrorKind::ReadFailed,
+            message: format!(
+                "GitHub reader 返回非成功状态 {}: {}",
+                status.as_u16(),
+                truncate_for_message(&body)
+            ),
+        });
+    }
+
+    Ok(body)
 }
 
 fn normalize_reader_body(body: &str) -> Result<String, ReaderError> {
@@ -124,6 +278,26 @@ mod tests {
             reader_endpoint("https://r.jina.ai/", "https://example.com/a"),
             "https://r.jina.ai/https://example.com/a"
         );
+    }
+
+    #[test]
+    fn github_repo_url_extracts_owner_and_repo() {
+        assert_eq!(
+            github_repo_from_url("https://github.com/AliceDel66/fe-fidelity-kit").unwrap(),
+            GitHubRepo {
+                owner: "AliceDel66".to_string(),
+                repo: "fe-fidelity-kit".to_string(),
+            }
+        );
+        assert_eq!(
+            github_repo_from_url("https://github.com/AliceDel66/fe-fidelity-kit/tree/main")
+                .unwrap(),
+            GitHubRepo {
+                owner: "AliceDel66".to_string(),
+                repo: "fe-fidelity-kit".to_string(),
+            }
+        );
+        assert_eq!(github_repo_from_url("https://example.com/a/b"), None);
     }
 
     #[test]

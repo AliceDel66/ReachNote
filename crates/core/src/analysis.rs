@@ -66,8 +66,9 @@ pub struct AnalysisValidationError {
 }
 
 pub fn parse_analysis_result(output: &str) -> Result<AnalysisResult, AnalysisValidationError> {
+    let candidate = extract_json_object(output.trim());
     let mut result: AnalysisResult =
-        serde_json::from_str(output.trim()).map_err(|error| AnalysisValidationError {
+        serde_json::from_str(&candidate).map_err(|error| AnalysisValidationError {
             kind: ErrorKind::ParseFailed,
             message: format!("AI provider 未返回合法 JSON: {error}"),
         })?;
@@ -87,6 +88,32 @@ pub fn parse_analysis_result(output: &str) -> Result<AnalysisResult, AnalysisVal
     }
 
     Ok(result)
+}
+
+// 真实模型即使被提示"只返回 JSON"，仍常见包一层 ```json 代码块或加前后说明文字；
+// 这里做宽松提取，只有连大括号都找不到时才把原文交给 serde_json 报错。
+fn extract_json_object(output: &str) -> String {
+    let without_fence = strip_code_fence(output).trim();
+
+    if without_fence.starts_with('{') && without_fence.ends_with('}') {
+        return without_fence.to_string();
+    }
+
+    match (without_fence.find('{'), without_fence.rfind('}')) {
+        (Some(start), Some(end)) if start < end => without_fence[start..=end].to_string(),
+        _ => without_fence.to_string(),
+    }
+}
+
+fn strip_code_fence(value: &str) -> &str {
+    let Some(after_open) = value.strip_prefix("```") else {
+        return value;
+    };
+    let after_lang = match after_open.find('\n') {
+        Some(index) => &after_open[index + 1..],
+        None => after_open,
+    };
+    after_lang.strip_suffix("```").unwrap_or(after_lang).trim()
 }
 
 pub fn build_analysis_prompt(request: &AnalysisRequest) -> String {
@@ -275,6 +302,26 @@ mod tests {
         let error = parse_analysis_result("not json").unwrap_err();
 
         assert_eq!(error.kind, ErrorKind::ParseFailed);
+    }
+
+    #[test]
+    fn parses_json_wrapped_in_markdown_fence() {
+        let parsed = parse_analysis_result(
+            "```json\n{\"title\":\"标题\",\"summary\":\"摘要\",\"key_points\":[\"一\",\"二\",\"三\"],\"tags\":[\"AI\"],\"score\":4,\"next_action\":\"复核\",\"model\":\"real-claude\"}\n```",
+        )
+        .unwrap();
+
+        assert_eq!(parsed.model, "real-claude");
+    }
+
+    #[test]
+    fn parses_json_with_surrounding_prose() {
+        let parsed = parse_analysis_result(
+            "这是根据你的要求生成的研究卡：\n{\"title\":\"标题\",\"summary\":\"摘要\",\"key_points\":[\"一\",\"二\",\"三\"],\"tags\":[\"AI\"],\"score\":4,\"next_action\":\"复核\",\"model\":\"real-claude\"}\n希望对你有帮助。",
+        )
+        .unwrap();
+
+        assert_eq!(parsed.model, "real-claude");
     }
 
     #[test]

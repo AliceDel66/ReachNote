@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use reachnote_core::analysis::ProviderId;
+use reachnote_core::notion::NotionSettings;
 use reachnote_core::task::{ErrorKind, Task, TaskStatus};
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -161,6 +162,14 @@ impl TaskStore {
         Ok(tasks)
     }
 
+    pub fn list_pending_sync_tasks(&self) -> Result<Vec<Task>, StoreError> {
+        Ok(self
+            .list_tasks()?
+            .into_iter()
+            .filter(task_needs_auto_sync)
+            .collect())
+    }
+
     pub fn get_task(&self, id: &str) -> Result<Option<Task>, StoreError> {
         let connection = self.lock_connection()?;
         connection
@@ -176,6 +185,77 @@ impl TaskStore {
             )
             .optional()
             .map_err(StoreError::database)
+    }
+
+    pub fn get_notion_settings(&self) -> Result<Option<NotionSettings>, StoreError> {
+        let connection = self.lock_connection()?;
+        connection
+            .query_row(
+                "SELECT token, database_id, version FROM notion_settings WHERE id = 1",
+                [],
+                |row| {
+                    Ok(NotionSettings {
+                        token: row.get(0)?,
+                        database_id: row.get(1)?,
+                        version: row.get(2)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(StoreError::database)
+    }
+
+    pub fn save_notion_settings(
+        &self,
+        settings: &NotionSettings,
+        updated_at: &str,
+    ) -> Result<(), StoreError> {
+        validate_notion_settings_for_storage(settings)?;
+        let connection = self.lock_connection()?;
+        connection.execute(
+            "INSERT INTO notion_settings (id, token, database_id, version, updated_at)
+            VALUES (1, ?1, ?2, ?3, ?4)
+            ON CONFLICT(id) DO UPDATE SET
+                token = excluded.token,
+                database_id = excluded.database_id,
+                version = excluded.version,
+                updated_at = excluded.updated_at",
+            params![
+                &settings.token,
+                &settings.database_id,
+                &settings.version,
+                updated_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn recover_stale_processing_tasks(
+        &self,
+        now: &str,
+        stale_after_seconds: u64,
+    ) -> Result<Vec<Task>, StoreError> {
+        let now_seconds = now.parse::<u64>().unwrap_or(0);
+        let tasks = self.list_tasks()?;
+        let mut recovered_tasks = Vec::new();
+
+        for mut task in tasks {
+            let previous_status = task.status;
+            if !task_status_can_recover(previous_status)
+                || !task_is_stale(&task, now_seconds, stale_after_seconds)
+            {
+                continue;
+            }
+
+            task.status = TaskStatus::Failed;
+            task.error_kind = Some(ErrorKind::ReadFailed);
+            task.error_message = Some(interrupted_task_message(previous_status).to_string());
+            task.updated_at = now.to_string();
+            self.update_task(&task)?;
+            recovered_tasks.push(task);
+        }
+
+        Ok(recovered_tasks)
     }
 
     fn migrate(&self) -> Result<(), StoreError> {
@@ -197,6 +277,8 @@ impl TaskStore {
             }
             Some(_) => {}
         }
+
+        connection.execute_batch(NOTION_SETTINGS_SCHEMA)?;
 
         Ok(())
     }
@@ -342,6 +424,16 @@ ALTER TABLE tasks_next RENAME TO tasks;
 COMMIT;
 ";
 
+const NOTION_SETTINGS_SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS notion_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    token TEXT NOT NULL,
+    database_id TEXT NOT NULL,
+    version TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+";
+
 fn schema_needs_rebuild(schema: &str) -> bool {
     !schema.contains("'analyzed'")
         || !schema.contains("provider_id")
@@ -372,6 +464,56 @@ fn validate_task_for_storage(task: &Task) -> Result<(), StoreError> {
     }
 
     Ok(())
+}
+
+fn validate_notion_settings_for_storage(settings: &NotionSettings) -> Result<(), StoreError> {
+    if settings.token.trim().is_empty() {
+        return Err(StoreError::invalid_record(
+            "Notion Integration Token 不能为空",
+        ));
+    }
+
+    if settings.database_id.trim().is_empty() {
+        return Err(StoreError::invalid_record("Notion Database ID 不能为空"));
+    }
+
+    if settings.version.trim().is_empty() {
+        return Err(StoreError::invalid_record("Notion API version 不能为空"));
+    }
+
+    Ok(())
+}
+
+fn task_status_can_recover(status: TaskStatus) -> bool {
+    matches!(
+        status,
+        TaskStatus::Reading | TaskStatus::Analyzing | TaskStatus::Syncing
+    )
+}
+
+fn task_is_stale(task: &Task, now_seconds: u64, stale_after_seconds: u64) -> bool {
+    let Ok(updated_at) = task.updated_at.parse::<u64>() else {
+        return true;
+    };
+
+    now_seconds.saturating_sub(updated_at) >= stale_after_seconds
+}
+
+fn interrupted_task_message(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Reading => "任务在读取阶段中断，已停止；请点击重试重新读取和分析。",
+        TaskStatus::Analyzing => "任务在分析阶段中断，已停止；请点击重试重新分析。",
+        TaskStatus::Syncing => {
+            "任务在同步阶段中断，已停止；本地研究卡已保留，请点击重试同步到 Notion。"
+        }
+        _ => "任务在上次运行中中断，已停止；请点击重试。",
+    }
+}
+
+fn task_needs_auto_sync(task: &Task) -> bool {
+    task.status == TaskStatus::Analyzed
+        && task.analysis_json.is_some()
+        && task.notion_page_id.is_none()
 }
 
 #[cfg(test)]
@@ -486,6 +628,93 @@ mod tests {
     }
 
     #[test]
+    fn recovers_only_stale_processing_tasks() {
+        let store = memory_store();
+        let mut reading = sample_task("reading");
+        reading.status = TaskStatus::Reading;
+        reading.updated_at = "10".to_string();
+        let mut analyzing = sample_task("analyzing");
+        analyzing.status = TaskStatus::Analyzing;
+        analyzing.updated_at = "20".to_string();
+        let mut syncing = sample_task("syncing");
+        syncing.status = TaskStatus::Syncing;
+        syncing.updated_at = "30".to_string();
+        syncing.analysis_json = Some(r#"{"title":"研究卡"}"#.to_string());
+        let mut recent = sample_task("recent");
+        recent.status = TaskStatus::Analyzing;
+        recent.updated_at = "95".to_string();
+        let mut queued = sample_task("queued");
+        queued.status = TaskStatus::Queued;
+        queued.updated_at = "1".to_string();
+
+        for task in [&reading, &analyzing, &syncing, &recent, &queued] {
+            store.insert_task(task).unwrap();
+        }
+
+        let recovered = store.recover_stale_processing_tasks("100", 60).unwrap();
+        let mut recovered_ids = recovered
+            .iter()
+            .map(|task| task.id.as_str())
+            .collect::<Vec<_>>();
+        recovered_ids.sort_unstable();
+        assert_eq!(recovered_ids, vec!["analyzing", "reading", "syncing"]);
+
+        let loaded_reading = store.get_task("reading").unwrap().unwrap();
+        assert_eq!(loaded_reading.status, TaskStatus::Failed);
+        assert_eq!(loaded_reading.error_kind, Some(ErrorKind::ReadFailed));
+        assert!(loaded_reading
+            .error_message
+            .as_deref()
+            .unwrap()
+            .contains("读取阶段中断"));
+        assert_eq!(loaded_reading.updated_at, "100");
+
+        let loaded_syncing = store.get_task("syncing").unwrap().unwrap();
+        assert_eq!(loaded_syncing.status, TaskStatus::Failed);
+        assert!(loaded_syncing.analysis_json.is_some());
+        assert!(loaded_syncing
+            .error_message
+            .as_deref()
+            .unwrap()
+            .contains("同步阶段中断"));
+
+        assert_eq!(
+            store.get_task("recent").unwrap().unwrap().status,
+            TaskStatus::Analyzing
+        );
+        assert_eq!(
+            store.get_task("queued").unwrap().unwrap().status,
+            TaskStatus::Queued
+        );
+    }
+
+    #[test]
+    fn lists_only_analyzed_tasks_waiting_for_sync() {
+        let store = memory_store();
+        let mut pending = sample_task("pending-sync");
+        pending.status = TaskStatus::Analyzed;
+        pending.analysis_json = Some(r#"{"title":"待同步"}"#.to_string());
+        let mut synced = sample_task("synced");
+        synced.status = TaskStatus::Synced;
+        synced.analysis_json = Some(r#"{"title":"已同步"}"#.to_string());
+        synced.notion_page_id = Some("page-id".to_string());
+        let mut failed_with_analysis = sample_task("failed");
+        failed_with_analysis.status = TaskStatus::Failed;
+        failed_with_analysis.analysis_json = Some(r#"{"title":"同步失败"}"#.to_string());
+        let mut analyzed_without_json = sample_task("no-json");
+        analyzed_without_json.status = TaskStatus::Analyzed;
+
+        store.insert_task(&pending).unwrap();
+        store.insert_task(&synced).unwrap();
+        store.insert_task(&failed_with_analysis).unwrap();
+        store.insert_task(&analyzed_without_json).unwrap();
+
+        let tasks = store.list_pending_sync_tasks().unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, pending.id);
+    }
+
+    #[test]
     fn migrate_rebuilds_legacy_schema_and_preserves_rows() {
         let connection = Connection::open_in_memory().unwrap();
         connection
@@ -522,5 +751,44 @@ mod tests {
         assert_eq!(loaded.provider_id, "claude_cli");
         assert_eq!(loaded.note, None);
         assert_eq!(loaded.analysis_json, None);
+
+        let settings = NotionSettings {
+            token: "ntn_fake_token".to_string(),
+            database_id: "database-123".to_string(),
+            version: "2022-06-28".to_string(),
+        };
+        store.save_notion_settings(&settings, "200").unwrap();
+        assert_eq!(store.get_notion_settings().unwrap(), Some(settings));
+    }
+
+    #[test]
+    fn notion_settings_round_trip_and_update() {
+        let store = memory_store();
+        assert_eq!(store.get_notion_settings().unwrap(), None);
+
+        let mut settings = NotionSettings {
+            token: "ntn_fake_token".to_string(),
+            database_id: "database-123".to_string(),
+            version: "2022-06-28".to_string(),
+        };
+        store.save_notion_settings(&settings, "100").unwrap();
+        assert_eq!(store.get_notion_settings().unwrap(), Some(settings.clone()));
+
+        settings.database_id = "database-456".to_string();
+        store.save_notion_settings(&settings, "200").unwrap();
+        assert_eq!(store.get_notion_settings().unwrap(), Some(settings));
+    }
+
+    #[test]
+    fn rejects_empty_notion_settings() {
+        let store = memory_store();
+        let settings = NotionSettings {
+            token: String::new(),
+            database_id: "database-123".to_string(),
+            version: "2022-06-28".to_string(),
+        };
+
+        let error = store.save_notion_settings(&settings, "100").unwrap_err();
+        assert_eq!(error.kind, ErrorKind::ParseFailed);
     }
 }

@@ -11,22 +11,24 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-555.svg">
   <img alt="Built with Tauri 2" src="https://img.shields.io/badge/built%20with-Tauri%202-24C8DB.svg?logo=tauri&logoColor=white">
-  <a href="https://heroui.com"><img alt="UI: HeroUI" src="https://img.shields.io/badge/UI-HeroUI-000.svg?logo=react"></a>
+  <img alt="Frontend: React + Tailwind" src="https://img.shields.io/badge/UI-React%20%2B%20Tailwind-38bdf8.svg?logo=react&logoColor=white">
   <a href="https://github.com/Panniantong/Agent-Reach"><img alt="Powered by Agent-Reach" src="https://img.shields.io/badge/powered%20by-Agent--Reach-0aa.svg?logo=github&logoColor=white"></a>
-  <img alt="Status" src="https://img.shields.io/badge/status-early%20development-orange.svg">
+  <img alt="Status" src="https://img.shields.io/badge/status-alpha-orange.svg">
+  <a href="https://github.com/AliceDel66/ReachNote/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/AliceDel66/ReachNote?include_prereleases&sort=semver"></a>
   <a href="https://github.com/AliceDel66/ReachNote/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/AliceDel66/ReachNote?style=social"></a>
 </p>
 
-> ReachNote is a **cross-platform (macOS / Windows) desktop AI capture tool**. While browsing GitHub, the web, videos, or RSS, you grab a link with one shortcut — a local agent reads the content, runs an AI analysis, and writes a structured card into your bound Notion database, building a personal research library that stays searchable and comparable over time.
+> ReachNote is a **cross-platform (macOS / Windows) desktop AI capture tool**. While browsing GitHub, the web, videos, or RSS, you grab a link — a local agent reads the content, runs an AI analysis, and writes a structured card into your bound Notion database, building a personal research library that stays searchable and comparable over time.
 
 > [!NOTE]
-> **Status: PRD reset (Pre-Alpha).** On 2026-06-30 the previous implementation progress was cleared at the user's request. This README now describes product intent and historical direction only; the current source of truth for the next implementation is [`plans/prds/20260630-1906-reachnote-mvp-reset.prd.md`](plans/prds/20260630-1906-reachnote-mvp-reset.prd.md).
+> **Status: Alpha.** The core loop — capture → read → AI analysis → Notion sync — runs end to end with a local SQLite queue and one-click retry. Some P1 items (Notion OAuth, global hotkey, template editing, OS keychain, code signing) are not done yet; see the [Roadmap](#roadmap). Grab a build from [Releases](https://github.com/AliceDel66/ReachNote/releases) or run from source.
 
 ---
 
 ## Table of Contents
 
 - [What is ReachNote](#what-is-reachnote)
+- [Download & Install](#download--install)
 - [Features](#features)
 - [The Core Flow](#the-core-flow)
 - [Architecture](#architecture)
@@ -57,25 +59,44 @@ Saving is easy; revisiting never happens. ReachNote tackles three broken links i
 
 ReachNote automates this chain. It is not "yet another bookmarking app" — it is:
 
-> **When I see a link worth studying, I don't organize it by hand — one shortcut turns it into a structured Notion research card I can later search, compare and follow up on.**
+> **When I see a link worth studying, I don't organize it by hand — one action turns it into a structured Notion research card I can later search, compare and follow up on.**
 
 The first release focuses on **developers / AI-tooling researchers**: GitHub repos, technical blogs, YouTube tutorials and RSS updates are frequent, stable sources whose output maps naturally onto a Notion database (positioning, tech stack, value judgment, follow-up).
 
 ---
 
+## Download & Install
+
+Prebuilt installers are published on the [**Releases**](https://github.com/AliceDel66/ReachNote/releases) page, built automatically for both platforms by GitHub Actions:
+
+| Platform | File | Notes |
+| --- | --- | --- |
+| **macOS** (Apple Silicon + Intel) | `ReachNote_*_universal.dmg` | one universal build for both chips |
+| **Windows** (x64) | `ReachNote_*_x64-setup.exe` / `*_x64_en-US.msi` | NSIS installer or MSI |
+
+> [!IMPORTANT]
+> Builds are currently **unsigned** (no Apple / Microsoft certificate yet), so the OS warns on first launch. This is expected for an alpha:
+> - **macOS** — after dragging to Applications, right-click the app → **Open** → **Open** again. Or run `xattr -dr com.apple.quarantine /Applications/ReachNote.app`.
+> - **Windows** — on the SmartScreen prompt, click **More info → Run anyway**.
+
+Before your first capture you need **one AI provider** (a local `claude` / `codex` CLI, or an OpenAI-compatible API) and a **Notion integration token + database ID**. See [Getting Started](#getting-started).
+
+---
+
 ## Features
 
-| Feature | Description |
-| --- | --- |
-| 💻 **Cross-platform desktop** | macOS and Windows, tray / menu-bar resident, built on Tauri with a light idle footprint |
-| 🖱️ **One-shortcut capture** | Clipboard URL, manual paste, global hotkey (planned) |
-| 🌐 **Multi-source reading** | Reads GitHub / web / YouTube transcripts / RSS via [Agent-Reach](https://github.com/Panniantong/Agent-Reach), with content extraction + denoising |
-| 🤖 **Templated AI analysis** | Not just a summary — structured fields by content type: positioning, tech stack, key points, value score, next action |
-| 🔌 **Three AI providers** | Local **Claude CLI** / local **Codex CLI** / any **OpenAI-compatible API** — bring your own compute and keys |
-| 🗂️ **Direct to Notion** | OAuth, automatic field mapping, written into the database you choose |
-| 🔁 **Local queue & retry** | Tasks persist locally; failures are human-readable and one-click retryable |
-| 🔐 **Local-first / privacy-friendly** | Content flows only "your machine → your AI → your Notion", no middle server |
-| 🆓 **Open source / BYOK** | MIT, no cloud account, no subscription, works with your own keys |
+| Feature | Status | Description |
+| --- | --- | --- |
+| 💻 **Cross-platform desktop** | ✅ | macOS and Windows, built on Tauri 2 with a light idle footprint; hide-to-menu-bar compact mode |
+| 🖱️ **One-action capture** | ✅ | paste a URL or pull it from the clipboard; add an optional note per capture |
+| 🌐 **Web / article reading** | ✅ | reads articles via [Agent-Reach](https://github.com/Panniantong/Agent-Reach)'s web route (Jina Reader) with source-type detection |
+| 🤖 **Structured AI analysis** | ✅ | not just a summary — title, summary, key points, tags, value score, next action, validated JSON |
+| 🔌 **Three AI providers** | ✅ | local **Claude CLI** / local **Codex CLI** / any **OpenAI-compatible API** — bring your own compute and keys |
+| 🗂️ **Direct to Notion** | ✅ | integration token + database ID, automatic field mapping, one link back to the created page |
+| 🔁 **Local queue & retry** | ✅ | tasks persist in SQLite; live status polling; stale tasks recover to a retryable failure |
+| 🔐 **Local-first / privacy-friendly** | ✅ | content flows only "your machine → your AI → your Notion", no middle server |
+| ⌨️ **Global hotkey / clipboard auto-detect** | 🚧 | planned (P1) |
+| 🔑 **Notion OAuth + OS keychain** | 🚧 | planned; today the token is entered manually and stored locally |
 
 ---
 
@@ -92,17 +113,17 @@ flowchart LR
     classDef sync fill:#047857,stroke:#a7f3d0,stroke-width:2px,color:#fff
 
     URL((URL)):::io
-    URL --> Capture(["1 · Capture<br/>Clipboard / Hotkey / Manual"]):::capture
-    Capture --> Detect(["2 · Detect Source<br/>GitHub · Web · Video · RSS"]):::capture
+    URL --> Capture(["1 · Capture<br/>Clipboard / Manual"]):::capture
+    Capture --> Detect(["2 · Detect Source<br/>GitHub · Web"]):::capture
     Detect --> Read(["3 · Read<br/>via Agent-Reach"]):::read
     Read --> Clean(["4 · Clean<br/>Extract · Denoise"]):::read
-    Clean --> Analyze(["5 · Analyze<br/>AI Template"]):::ai
+    Clean --> Analyze(["5 · Analyze<br/>AI Provider"]):::ai
     Analyze --> Map(["6 · Map<br/>Notion Fields"]):::sync
     Map --> Sync(["7 · Sync<br/>Write to Notion"]):::sync
     Sync --> Done((Done)):::sync
 ```
 
-> Design principle: the point is not "how many platforms we scrape" but that `GitHub / web / YouTube → AI template → Notion database` works reliably for every single item.
+> Design principle: the point is not "how many platforms we scrape" but that `link → AI analysis → Notion database` works reliably for every single item.
 
 ---
 
@@ -117,24 +138,24 @@ flowchart TB
     classDef cap fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
     classDef ext fill:#374151,stroke:#d1d5db,stroke-width:2px,color:#fff
 
-    subgraph UI["Desktop · Tauri + React + HeroUI (macOS / Windows)"]
+    subgraph UI["Desktop · Tauri + React (macOS / Windows)"]
         direction LR
-        Menu(["Menu Bar / Tray"]):::ui ~~~ History(["History / Queue"]):::ui ~~~ Detail(["Capture Detail"]):::ui ~~~ Settings(["Settings"]):::ui
+        Menu(["Menu Bar / Compact"]):::ui ~~~ History(["Queue / History"]):::ui ~~~ Detail(["Capture"]):::ui ~~~ Settings(["Settings"]):::ui
     end
 
     subgraph Core["Core Engine · Rust (reachnote-core)"]
         direction LR
-        CaptureSvc(["Capture Service"]):::core --> Queue(["Task Queue<br/>SQLite · Retry"]):::core --> Tmpl(["Template Engine"]):::core --> Mapper(["Notion Mapper"]):::core
+        CaptureSvc(["Task Model"]):::core --> Queue(["SQLite Queue<br/>Retry · Recover"]):::core --> Tmpl(["Analysis Parser"]):::core --> Mapper(["Notion Mapper"]):::core
     end
 
-    subgraph Cap["Capabilities · Subprocess / HTTP"]
+    subgraph Cap["Capabilities · Subprocess / HTTP (src-tauri)"]
         direction LR
-        Reach(["Agent-Reach<br/>spawn agent-reach"]):::cap ~~~ AIRouter(["AI Provider<br/>Router"]):::cap ~~~ NotionSync(["Notion Sync"]):::cap
+        Reach(["Reader<br/>Agent-Reach web"]):::cap ~~~ AIRouter(["AI Provider<br/>Router"]):::cap ~~~ NotionSync(["Notion Sync"]):::cap
     end
 
     subgraph Ext["External Services"]
         direction LR
-        Sites(["GitHub · Web<br/>YouTube · RSS"]):::ext ~~~ AIBackends(["Claude CLI · Codex CLI<br/>OpenAI-compatible API"]):::ext ~~~ NotionDB[("Notion Database")]:::ext
+        Sites(["GitHub · Web"]):::ext ~~~ AIBackends(["Claude CLI · Codex CLI<br/>OpenAI-compatible API"]):::ext ~~~ NotionDB[("Notion Database")]:::ext
     end
 
     UI ==> Core ==> Cap ==> Ext
@@ -145,9 +166,9 @@ flowchart TB
     style Ext fill:none,stroke:#9ca3af,stroke-width:2px,stroke-dasharray:5 5,color:#9ca3af
 ```
 
-- **Desktop layer** (Tauri + React + HeroUI): menu bar / tray, History / Queue, Capture Detail, Settings. History / Queue is the first screen.
-- **Core engine** (Rust): local orchestration. Capture service → persistent queue with retry → template engine builds the prompt → Notion mapper aligns fields.
-- **Capabilities**: three outward adapters — Agent-Reach (spawns `agent-reach` to read), AI Provider router (analysis), Notion Sync (writes cards).
+- **Desktop layer** (Tauri 2 + React 18 + Tailwind CSS): Queue (first screen), Capture, Templates, Settings, plus a hide-to-menu-bar compact mode.
+- **Core engine** (`crates/core`, Rust): the pure logic — task model & states, analysis JSON parsing/validation, Notion field mapping — unit-tested.
+- **Capabilities** (`src-tauri`): three outward adapters — the Reader (Agent-Reach web route), the AI Provider router (Claude / Codex / OpenAI-compatible), and Notion Sync — plus the SQLite store and Tauri commands.
 - **External services**: content sources, AI backends, your Notion database — all under your control.
 
 ---
@@ -164,46 +185,46 @@ flowchart TB
     classDef api fill:#1e40af,stroke:#bfdbfe,stroke-width:2px,color:#fff
     classDef out fill:#047857,stroke:#a7f3d0,stroke-width:2px,color:#fff
 
-    Req(["Content + Template Prompt"]):::io
-    Req --> Router{{"AI Provider Router<br/>reads user config"}}:::router
+    Req(["Content + Prompt"]):::io
+    Req --> Router{{"AI Provider Router<br/>reads your selection"}}:::router
 
     Router -->|Local CLI| Claude(["Claude CLI<br/>claude -p"]):::local
     Router -->|Local CLI| Codex(["Codex CLI<br/>codex exec"]):::local
-    Router -->|HTTP API| OpenAI(["OpenAI-compatible API<br/>base_url + key + model"]):::api
+    Router -->|HTTP API| OpenAI(["OpenAI-compatible API<br/>REACHNOTE_OPENAI_*"]):::api
 
-    Claude --> Parse(["Parse · Validate<br/>JSON Schema"]):::out
+    Claude --> Parse(["Parse · Validate<br/>JSON"]):::out
     Codex --> Parse
     OpenAI --> Parse
 
-    Parse --> Result(["Structured Result<br/>Summary · Key Points<br/>Tags · Score · Next Action"]):::out
+    Parse --> Result(["Structured Card<br/>Summary · Key Points<br/>Tags · Score · Next Action"]):::out
 ```
 
 | Provider | How it's called | Best for | What you provide |
 | --- | --- | --- | --- |
-| **Claude CLI** | local subprocess `claude -p` | already using Claude Code, want to reuse its login & quota | install & log into [Claude Code CLI](https://claude.com/claude-code) |
+| **Claude CLI** *(default)* | local subprocess `claude` | already using Claude Code, want to reuse its login & quota | install & log into [Claude Code CLI](https://claude.com/claude-code) |
 | **Codex CLI** | local subprocess `codex exec` | already using OpenAI Codex CLI | install & log into [Codex CLI](https://github.com/openai/codex) |
-| **OpenAI-compatible API** | HTTP request | official / proxy / local inference | `base_url` + `api_key` + `model` |
+| **OpenAI-compatible API** | HTTP request | official / proxy / local inference | `REACHNOTE_OPENAI_BASE_URL` + `REACHNOTE_OPENAI_API_KEY` + `REACHNOTE_OPENAI_MODEL` |
 
 > **Why local CLIs?** Many developers already have Claude / Codex CLI installed and logged in. ReachNote reuses them as subprocesses, so you **don't configure a separate API key** and content never passes through a third party. The OpenAI-compatible mode covers everything else — including local inference endpoints (Ollama `http://localhost:11434/v1`, LM Studio `http://localhost:1234/v1`) for fully offline use.
 
-Either way, ReachNote asks the model for the **same structured output**, validated against a JSON schema, so it maps cleanly onto Notion fields. See [Configuration](#configuration).
+Either way, ReachNote asks the model for the **same structured output**, validated after parsing, so it maps cleanly onto Notion fields.
 
 ---
 
 ## Capture Methods
 
-| Method | Description | Priority |
+| Method | Description | Status |
 | --- | --- | --- |
-| 📋 Clipboard URL | detect a link in the clipboard, capture in one click | P0 |
-| ⌨️ Manual paste | paste any URL into a popup | P0 |
-| 🔥 Global hotkey | capture from any app | P1 |
-| 🌍 Current browser URL | grab the page the foreground browser is on | P1 |
+| ⌨️ Manual paste | paste any http(s) article URL, add an optional note | ✅ P0 |
+| 📋 Clipboard button | pull a URL from the clipboard in one click | ✅ P0 |
+| 🔥 Global hotkey | capture from any app | 🚧 P1 |
+| 🌍 Current browser URL | grab the page the foreground browser is on | 🚧 P1 |
 
 ---
 
 ## Task Lifecycle
 
-Each captured task moves through these states in the local queue. **Failures are never silently dropped** — errors are readable and one-click retryable:
+Each captured task moves through these states in the local queue. **Failures are never silently dropped** — errors are readable and one-click retryable, and tasks stuck in a working state past a timeout are recovered to `Failed`:
 
 ```mermaid
 flowchart LR
@@ -216,7 +237,8 @@ flowchart LR
     Start --> Queued(["Queued"]):::st
     Queued --> Reading(["Reading"]):::work
     Reading --> Analyzing(["Analyzing"]):::work
-    Analyzing --> Syncing(["Syncing"]):::work
+    Analyzing --> Analyzed(["Analyzed"]):::work
+    Analyzed --> Syncing(["Syncing"]):::work
     Syncing --> Synced(["Synced OK"]):::ok
 
     Reading -. fail .-> Failed(["Failed<br/>visible error"]):::bad
@@ -225,61 +247,60 @@ flowchart LR
     Failed -. Retry .-> Queued
 ```
 
-> Two distinct state sets: the diagram shows the **in-app task processing state**; once in Notion, a card also has a **content lifecycle state** (`Inbox / Reviewing / Follow-up / Archived`) that you advance manually.
+> Capture submission returns as soon as the task is queued; reading + AI analysis run in the background, and the Queue polls the local DB (~1.2s) so status stays real. `Analyzed` tasks are auto-synced to Notion on the next queue refresh when a Notion connection is configured.
 
 ---
 
 ## Tech Stack
 
-The stack is settled — decided jointly by three constraints: cross-platform, always-resident, and the required HeroUI.
-
 | Layer | Choice |
 | --- | --- |
 | App shell | **Tauri 2** (cross-platform macOS / Windows) |
 | Frontend | **React 18** + TypeScript + Vite |
-| UI components | **HeroUI** + Tailwind CSS |
-| Core backend | **Rust** (`reachnote-core`, to be rebuilt) |
-| Persistence | SQLite |
-| Credential storage | OS keychain (keyring) |
-| Distribution | Tauri bundler → `.dmg` / `.msi` |
+| Styling | **Tailwind CSS v4** + `lucide-react` icons (hand-rolled components) |
+| Core backend | **Rust** (`reachnote-core`, unit-tested) |
+| Persistence | **SQLite** (`rusqlite`, bundled) |
+| AI / reading | subprocesses (`claude` / `codex` / `agent-reach`) + HTTP (`reqwest`) |
+| Distribution | Tauri bundler → `.dmg` (macOS) / `.exe` + `.msi` (Windows) |
 
-> **Why Tauri over Electron:** ReachNote is a resident tray app and sensitive to idle memory. Tauri reuses the system WebView (WKWebView on macOS, WebView2 on Windows), so the resident process is far lighter than Electron bundling a full Chromium per app. **The frontend is React** because HeroUI is a React component library. AI and reading are both orchestrated from Rust via subprocesses (`agent-reach` / `claude` / `codex`) and HTTP.
+> **Why Tauri over Electron:** ReachNote is a resident, compact-to-menu-bar app and sensitive to idle memory. Tauri reuses the system WebView (WKWebView on macOS, WebView2 on Windows), so the resident process is far lighter than Electron bundling a full Chromium per app. AI and reading are both orchestrated from Rust via subprocesses and HTTP.
 
 ---
 
-## Target Project Structure
-
-The implementation was cleared on 2026-06-30. This is the target structure to recreate after PRD approval.
+## Project Structure
 
 ```text
 rearchnote/
-├─ crates/core/        # reachnote-core: pure-logic core (Rust, unit-tested after rebuild)
-│  └─ src/
-│     ├─ ai/           # AI provider abstraction: claude-cli / codex-cli / openai-api + parsing
-│     └─ reach.rs      # wraps calls to the Agent-Reach CLI
-├─ src-tauri/          # Tauri shell: capture command, tray, persistence
-├─ src/                # React + HeroUI frontend (queue-first desktop UI)
-├─ Cargo.toml          # Rust workspace
-└─ package.json        # frontend deps + Tauri CLI
+├─ crates/core/src/          # reachnote-core: pure logic, unit-tested
+│  ├─ analysis.rs            # parse/validate AI output → structured card
+│  ├─ notion.rs              # Notion property mapping
+│  ├─ task.rs                # task model & lifecycle states
+│  └─ lib.rs
+├─ src-tauri/src/            # Tauri shell + capabilities
+│  ├─ lib.rs                 # Tauri commands + app wiring
+│  ├─ provider.rs            # AI providers: claude-cli / codex-cli / openai-compatible
+│  ├─ reader.rs              # Agent-Reach / web reading
+│  ├─ notion.rs              # Notion HTTP sync
+│  └─ store.rs               # SQLite task queue + settings
+├─ src/                      # React + Tailwind frontend (queue-first)
+│  └─ App.tsx
+├─ .github/workflows/        # release.yml — macOS + Windows installer CI
+├─ Cargo.toml                # Rust workspace (crates/core + src-tauri)
+└─ package.json              # frontend deps + Tauri CLI
 ```
 
 ---
 
 ## Getting Started
 
-> [!IMPORTANT]
-> PRD reset stage. The previous runnable implementation has been cleared. There is currently no app scaffold to run; rebuild should start from [`plans/prds/20260630-1906-reachnote-mvp-reset.prd.md`](plans/prds/20260630-1906-reachnote-mvp-reset.prd.md).
-
 ### Prerequisites
 
-- **Rust** (stable) and **Node 18+** / **pnpm**
-- At least one AI provider: local `claude` / `codex` CLI, or an OpenAI-compatible API `base_url` + `api_key`
-- Reading: [Agent-Reach](https://github.com/Panniantong/Agent-Reach) (`agent-reach` CLI; Python runtime on Windows)
-- A Notion account (for writing; in progress)
+- **Rust** (stable) and **Node 18+** with **pnpm**
+- At least one AI provider: a local `claude` / `codex` CLI, or an OpenAI-compatible API (`REACHNOTE_OPENAI_*`)
+- Reading: [Agent-Reach](https://github.com/Panniantong/Agent-Reach) available on `PATH` (`agent-reach` CLI)
+- A Notion **internal integration** (for writing)
 
-### Run
-
-After the PRD is approved and the Tauri/React/Rust scaffold is recreated, the target commands are:
+### Run from source
 
 ```bash
 git clone git@github.com:AliceDel66/ReachNote.git
@@ -288,117 +309,112 @@ pnpm install
 pnpm tauri dev
 ```
 
-### First-run setup (Onboarding)
+### Build installers
 
-Goal: **first working loop in under 2 minutes.**
+```bash
+pnpm tauri build        # local build for your current OS
+```
+
+Or push a `v*` tag — the [`release.yml`](.github/workflows/release.yml) workflow builds macOS (universal) and Windows installers and attaches them to a GitHub Release.
+
+### First-run setup
+
+Goal: **first working loop in a couple of minutes.**
 
 ```mermaid
 flowchart LR
     classDef step fill:#5b21b6,stroke:#ddd6fe,stroke-width:2px,color:#fff
     classDef done fill:#047857,stroke:#a7f3d0,stroke-width:2px,color:#fff
 
-    A(["1 · Connect Notion<br/>OAuth"]):::step
-    A --> B(["2 · Select / Create<br/>Database"]):::step
-    B --> C(["3 · Configure AI Provider<br/>Claude / Codex / API"]):::step
-    C --> D(["4 · Agent-Reach<br/>Doctor"]):::step
-    D --> E(["5 · Test Capture"]):::step
+    A(["1 · Create Notion<br/>integration"]):::step
+    A --> B(["2 · Share DB +<br/>paste Token / DB ID"]):::step
+    B --> C(["3 · Pick AI Provider<br/>Claude / Codex / API"]):::step
+    C --> D(["4 · Test Notion<br/>connection"]):::step
+    D --> E(["5 · Capture a URL"]):::step
     E --> F((Done)):::done
 ```
 
-1. **Connect Notion** — OAuth into the target workspace.
-2. **Select or create a database** — pick one, or create the default `ReachNote Research Inbox`.
-3. **Configure an AI provider** — one of the three.
-4. **Run Agent-Reach Doctor** — i.e. `agent-reach doctor`, to check reading channels.
-5. **Test a capture** — grab a GitHub repo and confirm the full chain works.
+1. **Create a Notion internal integration** — <https://www.notion.so/my-integrations> → copy the *Internal Integration Secret* (`ntn_...`).
+2. **Share your target database** with that integration, then in ReachNote → Settings paste the **Token** and **Database ID** and Save.
+3. **Pick an AI provider** — Claude CLI (default), Codex CLI, or OpenAI-compatible.
+4. **Test the Notion connection** from Settings.
+5. **Capture a URL** — paste an article link and confirm the full chain (read → analyze → sync) works.
 
 ---
 
 ## Configuration
 
-> The shape below is **the design target** (tentative path `~/.reachnote/config.toml`). Most users can do this in Settings — no hand-editing required.
+Most settings live in the in-app **Settings** page — no file editing required:
 
-```toml
-[ai]
-# one of: claude-cli | codex-cli | openai-api
-provider = "claude-cli"
+- **AI provider** — chosen per capture / in Settings (`claude_cli` · `codex_cli` · `openai_compatible`).
+- **Notion** — Integration Token + Database ID, saved to the local store (keychain storage is planned).
+- **OpenAI-compatible** — currently read from environment variables:
 
-[ai.claude-cli]
-command = "claude"        # reuse the logged-in Claude Code
-
-[ai.codex-cli]
-command = "codex"
-
-[ai.openai-api]
-base_url = "https://api.openai.com/v1"   # for local inference: http://localhost:11434/v1, etc.
-api_key  = "sk-..."
-model    = "gpt-4o-mini"
-
-[reach]
-command = "agent-reach"   # Agent-Reach CLI
-sources = ["github", "web", "youtube", "rss"]
-
-[notion]
-# written automatically by the OAuth flow
-database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-default_template = "github-project"
+```bash
+export REACHNOTE_OPENAI_BASE_URL="https://api.openai.com/v1"   # or http://localhost:11434/v1
+export REACHNOTE_OPENAI_API_KEY="sk-..."
+export REACHNOTE_OPENAI_MODEL="gpt-4o-mini"
 ```
+
+> Never commit real tokens. `.env*` files are gitignored; see `.env.notion.example` for the Notion smoke-test template.
 
 ---
 
 ## Notion Database Schema
 
-Default database: **`ReachNote Research Inbox`**
+Point ReachNote at a database whose properties match the table below. On sync it writes these **13 properties** (name and type must match):
 
 | Field | Type | Notes |
 | --- | --- | --- |
 | `Title` | Title | content title |
 | `URL` | URL | original link |
-| `Source Type` | Select | `GitHub` / `Article` / `Video` / `RSS` / `Social` |
+| `Source Type` | Select | `GitHub` / `Article` / … |
 | `Summary` | Text | AI summary |
-| `Key Points` | Text | key takeaways |
+| `Key Points` | Text | key takeaways (newline-joined) |
 | `Tags` | Multi-select | auto-tagged |
-| `Status` | Select | `Inbox` / `Reviewing` / `Follow-up` / `Archived` |
-| `Score` | Number | value score (0-100) |
+| `Status` | Select | set to `Inbox` on write; advance manually |
+| `Score` | Number | value score `0–100` (from a 1–5 rating ×20) |
 | `Captured At` | Date | capture time |
 | `Synced At` | Date | write time |
 | `AI Model` | Text | model / provider actually used |
 | `Template` | Select | analysis template used |
-| `Raw Content` | Text | cleaned source text |
 | `Next Action` | Text | suggested next step |
+
+> The default database is **`ReachNote Research Inbox`**. `Status` also acts as your manual content lifecycle (`Inbox` / `Reviewing` / `Follow-up` / `Archived`).
 
 ---
 
 ## Built-in AI Templates
 
-Templates define the structure of the AI output. Four ship in the first release, auto-selected by source (manual selection in P1):
+Templates define the structure of the AI output. The first release ships the **Article Reading Note** as the working preview; the others are shown as directions in the Templates tab (editing/selection is P1):
 
-| Template | Source | Output fields |
-| --- | --- | --- |
-| **GitHub Project Analysis** | GitHub repo | positioning · features · tech stack · use cases · highlights · risks · worth following |
-| **Article Reading Note** | blog / web | one-line summary · key points · evidence · reusable takeaways · tags |
-| **Video Note** | YouTube transcript | topic · chapter summary · key points · action items · who it's for |
-| **RSS Brief** | RSS / feed | what's new · why it matters · category tags · needs follow-up reading |
+| Template | Source | Output fields | Status |
+| --- | --- | --- | --- |
+| **Article Reading Note** | blog / web | summary · key points · tags · score · next action | ✅ preview |
+| **GitHub Project Analysis** | GitHub repo | positioning · tech stack · highlights · risks | 🚧 planned |
+| **Video Note** | YouTube transcript | topic · key points · segments | 🚧 planned |
+| **RSS Brief** | RSS / feed | what's new · why it matters · tags | 🚧 planned |
 
 ---
 
 ## Roadmap
 
-### P0 — MVP loop
+### P0 — MVP loop ✅
 
 - [x] AI provider abstraction (Claude CLI / Codex CLI / OpenAI-compatible API) + unit tests
-- [x] Source detection and template routing
-- [ ] Notion OAuth + database select / create
-- [ ] Manual / clipboard URL capture
-- [ ] Agent-Reach reading integration (align with real subcommand)
-- [ ] Notion writing
-- [ ] Local task queue + failure retry
+- [x] Source detection (GitHub / web) and analysis parsing
+- [x] Manual / clipboard-button URL capture
+- [x] Agent-Reach reading (web route / Jina Reader)
+- [x] Notion writing (integration token + database ID, minimal sync)
+- [x] Local task queue + failure retry + stale-task recovery
 
 ### P1 — Experience
 
-- [ ] Global hotkey / current-browser-URL capture
-- [ ] Template selection
-- [ ] Agent-Reach Doctor UI
-- [ ] Simple batch processing
+- [ ] Notion OAuth (replace manual token) + OS keychain credential storage
+- [ ] Global hotkey / current-browser-URL / clipboard auto-detect
+- [ ] Template selection + per-source routing
+- [ ] OpenAI-compatible configuration in the Settings UI (env vars today)
+- [ ] Code signing / notarization for signed installers
 
 ### P2 — Monitoring
 
@@ -416,7 +432,7 @@ Templates define the structure of the AI output. Four ship in the first release,
 ReachNote is a **local-first** open-source tool. There is no cloud account and no ReachNote server.
 
 - **Content flows only three ways:** your machine → your AI provider → your Notion. No third-party relay.
-- **Bring your own keys (BYOK):** API keys and Notion credentials live in the OS keychain locally, never uploaded.
+- **Bring your own keys (BYOK):** Notion and API credentials stay local (local store today; OS keychain planned), never uploaded.
 - **Can be fully offline:** with a local CLI or local inference (Ollama / LM Studio), content never leaves your machine.
 - **Failures are visible:** tasks and errors stay local and are never silently dropped.
 
@@ -426,9 +442,9 @@ ReachNote is a **local-first** open-source tool. There is no cloud account and n
 
 ReachNote stands on the shoulders of:
 
-- **[Agent-Reach](https://github.com/Panniantong/Agent-Reach)** — the cross-platform reading layer that lets ReachNote "see the internet" (GitHub / web / YouTube / RSS and more).
-- **[HeroUI](https://heroui.com)** — the React UI component library.
+- **[Agent-Reach](https://github.com/Panniantong/Agent-Reach)** — the cross-platform reading layer that lets ReachNote "see the internet".
 - **[Tauri](https://tauri.app)** — the cross-platform desktop shell.
+- **[React](https://react.dev)** + **[Tailwind CSS](https://tailwindcss.com)** + **[lucide](https://lucide.dev)** — the frontend.
 
 ---
 
@@ -438,13 +454,13 @@ ReachNote is early — **the best time to help shape it.**
 
 - 💡 Ideas / use cases / source requests → open a [Discussion](https://github.com/AliceDel66/ReachNote/discussions)
 - 🐛 Bugs / design gaps → file an [Issue](https://github.com/AliceDel66/ReachNote/issues)
-- 🔧 Want to code → look at P0 in the roadmap and pick something up
+- 🔧 Want to code → look at P1 in the roadmap and pick something up
 
 ---
 
 ## License
 
-Planned to be released under the **[MIT License](LICENSE)** — no commercialization plans, free to use, modify and distribute.
+Released under the **[MIT License](LICENSE)** — free to use, modify and distribute.
 
 ---
 

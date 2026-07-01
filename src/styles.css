@@ -49,7 +49,7 @@ textarea {
   height: 78px;
   border-bottom: 1px solid var(--line);
   display: grid;
-  grid-template-columns: 210px minmax(340px, 1fr) 144px;
+  grid-template-columns: 210px minmax(300px, 1fr) auto;
   align-items: center;
   padding: 0 26px;
   position: sticky;
@@ -116,27 +116,64 @@ textarea {
 
 .header-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 10px;
 }
 
 .icon-button {
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   display: inline-grid;
   place-items: center;
-  border: 1px solid #d8e0ec;
-  border-radius: 10px;
-  background: #fff;
-  color: #101828;
+  border: 1px solid #dbe4ef;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  color: #172033;
   cursor: pointer;
-  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.02);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 8px 20px rgba(15, 23, 42, 0.045);
+  transition:
+    border-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+.icon-button svg {
+  display: block;
+}
+
+.icon-button:hover:not(:disabled) {
+  border-color: #b9cdee;
+  color: var(--blue);
+  transform: translateY(-1px);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 12px 24px rgba(15, 23, 42, 0.075);
 }
 
 .icon-button.active {
   color: var(--blue);
   border-color: #b8d4ff;
-  box-shadow: 0 0 0 1px #d8e8ff inset;
+  background: linear-gradient(180deg, #ffffff 0%, #eef6ff 100%);
+  box-shadow:
+    0 0 0 1px #d8e8ff inset,
+    0 10px 22px rgba(11, 107, 255, 0.08);
+}
+
+.icon-button:focus-visible {
+  outline: 2px solid rgba(11, 107, 255, 0.28);
+  outline-offset: 2px;
+}
+
+.icon-button:disabled {
+  color: #98a2b3;
+  border-color: #e2e8f0;
+  cursor: wait;
+  transform: none;
+  box-shadow: none;
 }
 
 .app-content {
@@ -318,6 +355,8 @@ textarea {
 .row-action {
   height: 28px;
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
   padding: 0 9px;
   border: 1px solid #b8d4ff;
   border-radius: 7px;
@@ -326,6 +365,7 @@ textarea {
   font-size: 13px;
   font-weight: 680;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .row-action:disabled {
@@ -540,6 +580,24 @@ textarea {
   font-weight: 680 !important;
   line-height: 1 !important;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.secondary-action:disabled {
+  border-color: #cfd8e5 !important;
+  color: #98a2b3 !important;
+  cursor: not-allowed;
+}
+
+.notion-goto-settings {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--blue);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 650;
   cursor: pointer;
 }
 
@@ -981,21 +1039,52 @@ textarea {
   font-style: normal;
 }
 
-.notion-settings {
+.notion-settings-card .field-label {
+  margin-top: 12px;
+}
+
+.notion-settings-card .field-label:first-of-type {
+  margin-top: 0;
+}
+
+.notion-settings-actions {
   display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.notion-settings-actions .secondary-action {
+  margin-top: 0;
+}
+
+.notion-save-action {
+  height: 34px;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 18px;
+  gap: 7px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 7px;
+  background: var(--blue);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 680;
+  cursor: pointer;
 }
 
-.notion-settings strong {
-  display: block;
-  margin-top: 6px;
-  font-size: 15px;
-  color: #1f2937;
+.notion-save-action:disabled {
+  background: #e8edf5;
+  color: #98a2b3;
+  cursor: not-allowed;
 }
 
-.notion-settings p,
+.field-success {
+  margin: 8px 0 0;
+  color: #16794f;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .privacy-card p {
   margin: 4px 0 0;
   color: #56647a;
@@ -1065,10 +1154,5 @@ textarea {
     grid-column: 2;
     justify-self: start;
     margin-top: 6px;
-  }
-
-  .notion-settings {
-    align-items: flex-start;
-    flex-direction: column;
   }
 }

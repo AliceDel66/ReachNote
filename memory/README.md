@@ -4,7 +4,7 @@ Last updated: 2026-07-01
 
 ## Current Snapshot
 
-状态：In Progress / Agent-Reach content reading wired to local analysis
+状态：Done / Analyzed-to-Notion auto-sync hardened
 
 用户要求清空旧实现后，当前已恢复 Tauri 2 + React 18 + HeroUI + Rust core 最小桌面壳，并推进到本地 SQLite 队列与最小 worker 地基。
 
@@ -14,8 +14,16 @@ Last updated: 2026-07-01
 - `src/`、`src-tauri/`、`crates/core/` 当前已有新脚手架和本地队列实现，不能再按“无源码”假设工作。
 - 新版 UI 设计图登记在 `memory/design-source.md`。
 - 新 PRD 输出在 `plans/prds/20260630-1906-reachnote-mvp-reset.prd.md`。
-- 最新代码链路：`Article URL -> create_capture_task(provider_id) -> SQLite tasks -> run_capture_task -> AgentReachWebReader(Jina Reader) -> AnalysisRequest(content_text/content_reader) -> ProviderRunner -> AnalysisResult JSON validation -> Analyzed/Failed -> Queue UI`。
-- 当前 worker 支持 `claude_cli`、`codex_cli`、`openai_compatible` 三种 provider。Claude/Codex 走本地 CLI，OpenAI-compatible 读取 `REACHNOTE_OPENAI_BASE_URL` / `REACHNOTE_OPENAI_MODEL` / 可选 `REACHNOTE_OPENAI_API_KEY`。Agent-Reach web route 现以 Jina Reader 作为文章正文读取入口；Notion 仍未写入。
+- 最新代码链路：`Article URL -> create_capture_task(provider_id) -> SQLite tasks -> recover_interrupted_tasks -> run_capture_task -> AgentReachWebReader(Jina Reader / GitHub API fallback) -> AnalysisRequest(content_text/content_reader) -> ProviderRunner -> AnalysisResult JSON validation -> Analyzed -> sync_capture_task -> local notion_settings -> NotionClient -> Synced/Failed -> Queue UI`。
+- 当前 worker 支持 `claude_cli`、`codex_cli`、`openai_compatible` 三种 provider。Claude/Codex 走本地 CLI，OpenAI-compatible 读取 `REACHNOTE_OPENAI_BASE_URL` / `REACHNOTE_OPENAI_MODEL` / 可选 `REACHNOTE_OPENAI_API_KEY`。Agent-Reach web route 默认以 Jina Reader 作为文章正文读取入口，GitHub repo 走 GitHub API fallback；Notion 同步已接入本地 settings。
+- Notion settings 已接 SQLite `notion_settings` singleton，前端设置页调用 `get_notion_settings` / `save_notion_settings` / `test_notion_connection`，同步不再读取 `NOTION_TOKEN` / `NOTION_DATABASE_ID` 环境变量。
+- GitHub repo URL 真实读取已补 `GitHub API / README` fallback；原因是 Jina Reader 对 `github.com` 真实返回 451，导致用户给的 `AliceDel66/fe-fidelity-kit` 无法通过默认 Jina 路径读取。
+- 真实后端 E2E 已通过：`AliceDel66/fe-fidelity-kit` -> GitHub API/README -> real Claude CLI -> real Notion page，输出 `REAL_E2E_PAGE_ID=390c9b0c-3c3c-81d2-b04d-f0cd5b8859bb`。这不是 fake/smoke 数据。
+- Tauri dev 桌面 UI smoke 已通过 AX fallback：采集页提交非敏感 `example.com` smoke URL，fake reader + fake Claude 生成结构化卡，`sync_capture_task` 写入真实 Notion page；验证时该 smoke 任务为 `synced`，Notion API `GET /v1/pages/{id}` 返回 200 且 Title/URL/Status/Score/Source Type/Tags/AI Model 均匹配。
+- 队列 in-progress 恢复已接入：前端加载/轮询队列前会调用 `recover_interrupted_tasks`，默认恢复超过 300 秒未更新的 `reading/analyzing/syncing` 为 `failed/read_failed`；失败行的 `重试` 统一调用 `retry_capture_task`，后端根据 `analysis_json` 决定重跑分析或只重试 Notion 同步。
+- `Analyzed` 不再是会静默停住的终态：`run_capture_task` 后端命令分析成功后会继续 `sync_capture_task_blocking`；队列加载/刷新也会调用 `sync_pending_analyzed_tasks`，补同步历史遗留的 `Analyzed + analysis_json + no notion_page_id` 任务。
+- 顶部右侧 icon 已按用户反馈收敛为更轻的 `Search` / `Settings2` / `Minimize2`；缩小目标已澄清为 macOS 系统菜单栏语义：隐藏主窗口、后台静默运行、后续用 Dock Reopen/快捷键唤回，不再渲染伪 compact bar 小窗口。
+- Computer Use 仍是 Blocked：对 `ReachNote`、`reachnote-app` 和 debug binary 完整路径均返回 `Invalid app`。既有队列/同步桌面验证可记为 Tauri dev + macOS Accessibility fallback PASS；最新缩小隐藏点击因 `osascript` 辅助访问被拒只能记为 Blocked，不能记为 Computer Use PASS。
 
 ## Rules
 
@@ -65,3 +73,13 @@ Last updated: 2026-07-01
 - 验证：`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml` 均通过；Tauri dev 使用 fake Claude CLI 完成真实窗口冒烟，SQLite 最新任务为 `analyzed` 且写入 `analysis_json`。
 - 第五刀实现：Agent-Reach 内容读取接入 `AnalysisRequest` 正文输入。新增 `src-tauri/src/reader.rs`，通过 `REACHNOTE_AGENT_REACH_WEB_READER_BASE_URL`（默认 `https://r.jina.ai`）读取文章正文，成功后把 `content_text` / `content_reader` 注入统一 provider prompt；读取失败会写回 `Failed/read_failed` 或 `network_failed`。
 - 验证：`cargo test -p reachnote-core` 13 个测试通过，`cargo test --manifest-path src-tauri/Cargo.toml` 15 个测试通过；Tauri dev 使用本地 mock Jina Reader + fake Claude CLI 完成真实窗口冒烟，SQLite 最新任务为 `analyzed/Reader Content OK`，`analysis_json.summary` 证明正文已进入 provider prompt。
+- 第六刀实现：Notion 后端接入本地配置。`store.rs` 新增 `notion_settings` 表和 `get_notion_settings` / `save_notion_settings`；`src-tauri/src/notion.rs` 改为 `NotionSettings` 构造并新增 `test_connection`；`lib.rs` 注册 `get_notion_settings` / `save_notion_settings` / `test_notion_connection` / `sync_capture_task`，同步读取 SQLite settings。
+- 真实数据修复：Jina Reader 对 `github.com` 返回 451，新增 GitHub repo direct reader fallback，通过 GitHub API metadata + README raw 构造正文。
+- 真实 E2E：显式 ignored test `real_e2e_fe_fidelity_kit_claude_to_notion` 已用 `.env.notion`、`/opt/homebrew/bin/claude`、真实 GitHub repo 和真实 Notion API 跑通，返回 page id `390c9b0c-3c3c-81d2-b04d-f0cd5b8859bb`。
+- 验证：`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml` 全部通过；真实 E2E ignored test 1 passed。
+- 本机队列数据状态：此前按用户要求清空过 `tasks` 表并保留 `notion_settings`；本轮 Notion UI smoke 又写入测试任务。验证时该 smoke 任务为 `synced`，带 `notion_page_id` 和 `synced_at`。当前 app data 可能被仍在运行的 dev session 继续改写；队列数据源仍为 `list_capture_tasks` -> SQLite，源码中未发现 seed/default row。
+- 第六刀收尾验证：`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml`、`git diff --check` 均通过；`pnpm tauri dev` 通过 AX fallback 触发真实 Notion 同步 smoke。
+- 第七刀实现：队列 in-progress 状态恢复与重试调度。新增 `recover_interrupted_tasks` 和 `retry_capture_task`；恢复阈值默认 300 秒，可用 `REACHNOTE_STALE_TASK_SECS` 调整；恢复时保留本地研究卡和 Notion page 信息，只写失败状态与可读错误。
+- 验证：`cargo test --manifest-path src-tauri/Cargo.toml` 30 passed / 1 ignored，`cargo test -p reachnote-core` 20 passed，`pnpm typecheck`、`pnpm build`、`cargo check --manifest-path src-tauri/Cargo.toml` 通过。Tauri dev + AX fallback 插入 stale `reading` 测试行后 reload，DB 验证恢复为 `failed/read_failed`，队列 UI 显示失败原因和 `重试`；测试 row 已删除。
+- Bugfix：修复用户截图中的 `OpenCLI` 任务停在 `已分析` 不同步 Notion。根因是同步由前端在 `run_capture_task` 返回后继续发起，窗口 reload/HMR/关闭会让后续 `sync_capture_task` 丢失；修复后后端 `run_capture_task` 自己完成 `Analyzed -> Syncing -> Synced/Failed`，队列加载还会补同步遗留 `Analyzed`。
+- 验证：`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo test --manifest-path src-tauri/Cargo.toml` 32 passed / 1 ignored、`cargo check --manifest-path src-tauri/Cargo.toml` 通过；Tauri dev + AX fallback reload 后，截图中的 `task-1782878357-900342000-78578-1` 已从 `analyzed` 变为 `synced`，Notion page id `390c9b0c-3c3c-81b7-8332-e4a8b4413cb6`，队列 UI 显示 `已完成` 和 `Notion`。

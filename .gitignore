@@ -15,7 +15,20 @@ dist-ssr
 # Tauri generated
 /src-tauri/gen
 
+# Redundant packaged brand assets (extracted files under assets/ are tracked)
+/assets/*.zip
+
 # Logs
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# Secrets / local credentials — never commit real Notion tokens, API keys, .env values
+.env
+.env.*
+!.env.*.example
+*.token
+*-secret.*
+secrets.*
+config/secrets.*
+config/*.secret.json

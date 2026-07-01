@@ -25,12 +25,17 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
     "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "AI web capture for Notion",
+    "longDescription": "ReachNote turns any link you browse into a structured Notion research card — local reading, AI analysis and Notion sync, all local-first.",
     "icon": [
-      "../assets/reachnote_brand_assets/png/icon/reachnote-symbol-transparent-32.png",
-      "../assets/reachnote_brand_assets/png/icon/reachnote-symbol-transparent-128.png",
-      "../assets/reachnote_brand_assets/png/icon/reachnote-symbol-transparent-512.png"
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
     ]
   }
 }

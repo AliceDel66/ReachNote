@@ -54,6 +54,9 @@ impl ProviderRunner {
 
         let prompt = build_analysis_prompt(request);
         let mut process = Command::new(&command);
+        // prompt 一律走 stdin，不作为 argv 传：`--tools` 是变长参数（`<tools...>`），
+        // 如果 prompt 紧跟在它后面会被一并吞进 tools 列表，导致 --print 模式收不到
+        // prompt 转而阻塞等 stdin；未显式配置 stdin 时又会挂到超时（已用真实 CLI 复现）。
         process.args([
             "-p",
             "--output-format",
@@ -64,9 +67,8 @@ impl ProviderRunner {
             "--tools",
             "",
         ]);
-        process.arg(prompt);
 
-        let output = run_process("Claude CLI", &mut process, self.timeout)?;
+        let output = run_process("Claude CLI", &mut process, self.timeout, &prompt)?;
         parse_provider_output(&output)
     }
 
@@ -78,21 +80,50 @@ impl ProviderRunner {
         ensure_executable("Codex CLI", "REACHNOTE_CODEX_CMD", &command)?;
 
         let prompt = build_analysis_prompt(request);
+        // codex exec 会把 header、回显 prompt、"tokens used" 等噪音一起打到 stdout，而
+        // prompt 里本身含 JSON schema 的花括号，naive 的"首个 { 到末个 }"提取会把回显
+        // 和答案一并吞掉导致解析失败。用 --output-last-message 把"模型最终消息"单独落盘，
+        // 只解析这份干净输出（真实 codex 0.132 实测为单行合法 JSON）。
+        let output_path = codex_last_message_path();
         let mut process = Command::new(&command);
+        // 关键修复：codex exec 没有 --ask-for-approval（那是交互式 TUI 的参数），
+        // 传了会 `error: unexpected argument` 直接非零退出——这正是"切 Codex 必失败"的根因。
+        // exec 本身就是非交互，read-only sandbox 下不会弹审批。
+        // --ignore-user-config 跳过 ~/.codex/config.toml，-c mcp_servers={} 再清掉 MCP，
+        // 否则会尝试连 Notion/Figma 等个人 MCP，单次分析多花几万 token 并逼近超时。
         process.args([
             "exec",
             "--skip-git-repo-check",
             "--ignore-rules",
+            "--ignore-user-config",
+            "-c",
+            "mcp_servers={}",
             "--sandbox",
             "read-only",
             "--color",
             "never",
             "--ephemeral",
+            "--output-last-message",
         ]);
-        process.arg(prompt);
+        process.arg(&output_path);
 
-        let output = run_process("Codex CLI", &mut process, self.timeout)?;
-        parse_provider_output(&output)
+        let stdout = match run_process("Codex CLI", &mut process, self.timeout, &prompt) {
+            Ok(stdout) => stdout,
+            Err(error) => {
+                let _ = std::fs::remove_file(&output_path);
+                return Err(error);
+            }
+        };
+
+        // 优先用 --output-last-message 落盘的干净最终消息；文件缺失/为空时（如测试里
+        // 忽略该参数、只往 stdout 打印 JSON 的 fake CLI）回退到 stdout，兼顾健壮与可测。
+        let last_message = std::fs::read_to_string(&output_path)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let _ = std::fs::remove_file(&output_path);
+
+        parse_provider_output(&last_message.unwrap_or(stdout))
     }
 
     fn analyze_openai_compatible(
@@ -165,6 +196,18 @@ impl ProviderRunner {
     }
 }
 
+fn codex_last_message_path() -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    // 进程 id + 进程内单调序号，避免并发/连续分析在同一 temp 目录里撞文件名。
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    env::temp_dir().join(format!(
+        "reachnote-codex-last-{}-{}.json",
+        std::process::id(),
+        SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
 fn provider_command(env_key: &str, default_command: &str) -> String {
     env::var(env_key)
         .ok()
@@ -210,8 +253,10 @@ fn run_process(
     label: &str,
     process: &mut Command,
     timeout: Duration,
+    stdin_input: &str,
 ) -> Result<String, ProviderError> {
     let mut child = process
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -220,9 +265,15 @@ fn run_process(
             message: format!("{label} 启动失败: {error}"),
         })?;
 
-    // 在等待进程结束的同时持续 drain stdout/stderr：否则子进程一旦写满 OS pipe
-    // 缓冲区（macOS 约 64KB）就会阻塞在 write 上，而本线程在 wait_timeout 处阻塞等它退出，
-    // 形成死锁直到超时。用独立读线程消费管道，避免该死锁。
+    // stdin 写入、stdout/stderr 读取各用独立线程：CLI 可能边读 prompt 边产生输出，
+    // 若在本线程顺序 写 stdin -> 等 wait_timeout，一旦子进程先写满 stdout/stderr 的
+    // OS pipe 缓冲区（macOS 约 64KB）就会相互阻塞，直到超时才失败。
+    let mut stdin_pipe = child.stdin.take().expect("stdin 已配置为 piped");
+    let stdin_payload = stdin_input.to_string();
+    let stdin_writer = std::thread::spawn(move || {
+        let _ = std::io::Write::write_all(&mut stdin_pipe, stdin_payload.as_bytes());
+        // drop stdin_pipe：关闭写端，子进程读到 EOF。
+    });
     let mut stdout_pipe = child.stdout.take().expect("stdout 已配置为 piped");
     let mut stderr_pipe = child.stderr.take().expect("stderr 已配置为 piped");
     let stdout_reader = std::thread::spawn(move || {
@@ -248,7 +299,8 @@ fn run_process(
         }
     };
 
-    // 进程退出或被 kill 后管道关闭，读线程读到 EOF 自然结束。
+    // 进程退出或被 kill 后管道关闭，读/写线程自然结束（读线程读到 EOF，写线程写完或收到 EPIPE）。
+    let _ = stdin_writer.join();
     let stdout_buffer = stdout_reader.join().unwrap_or_default();
     let stderr_buffer = stderr_reader.join().unwrap_or_default();
 
@@ -359,7 +411,14 @@ mod tests {
     use std::fs;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::sync::{Mutex, MutexGuard};
     use std::thread;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_env() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().expect("provider env test lock poisoned")
+    }
 
     fn sample_request() -> AnalysisRequest {
         AnalysisRequest {
@@ -386,6 +445,71 @@ printf '%s\n' '{{"title":"{title}","summary":"基于 URL 的初步判断","key_p
         let mut permissions = fs::metadata(path).unwrap().permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(path, permissions).unwrap();
+    }
+
+    // 读 stdin 并把是否收到指定 marker 写进 summary，用来证明 prompt 真的通过 stdin
+    // 到达子进程（回归 --tools 变长参数吞掉 argv prompt 导致的挂起 bug）。
+    #[cfg(unix)]
+    fn fake_cli_stdin_echo(path: &Path, marker: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let body = format!(
+            r#"#!/bin/sh
+INPUT="$(cat)"
+case "$INPUT" in
+  *"{marker}"*) FLAG="marker-found" ;;
+  *) FLAG="marker-missing" ;;
+esac
+printf '{{"title":"stdin 回显","summary":"%s","key_points":["a","b","c"],"tags":["t"],"score":3,"next_action":"复核","model":"stdin-echo"}}\n' "$FLAG"
+"#
+        );
+        fs::write(path, body).unwrap();
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+
+    // 把最终 JSON 写到"最后一个 argv"（即 --output-last-message 的路径），并往 stdout
+    // 打印带花括号的噪音，用来证明 codex provider 优先解析落盘文件而不是脏 stdout。
+    #[cfg(unix)]
+    fn fake_codex_writes_last_message(path: &Path, model: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let body = format!(
+            r#"#!/bin/sh
+for last_arg in "$@"; do :; done
+printf '%s' '{{"title":"来自文件","summary":"落盘最终消息","key_points":["a","b","c"],"tags":["t"],"score":4,"next_action":"复核","model":"{model}"}}' > "$last_arg"
+printf 'OpenAI Codex noise {{"title":"stdout 脏数据"}} tokens used 999\n'
+"#
+        );
+        fs::write(path, body).unwrap();
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn codex_cli_provider_prefers_output_last_message_file() {
+        let _env_guard = lock_env();
+        let path = env::temp_dir().join(format!(
+            "reachnote-fake-codex-lastmsg-{}",
+            std::process::id()
+        ));
+        fake_codex_writes_last_message(&path, "file-codex");
+        env::set_var("REACHNOTE_CODEX_CMD", &path);
+
+        let result = ProviderRunner {
+            timeout: Duration::from_secs(5),
+        }
+        .analyze(ProviderId::CodexCli, &sample_request())
+        .unwrap();
+
+        env::remove_var("REACHNOTE_CODEX_CMD");
+        let _ = fs::remove_file(path);
+        // 优先落盘文件：model 来自文件而非 stdout 噪音。
+        assert_eq!(result.model, "file-codex");
+        assert_eq!(result.title, "来自文件");
     }
 
     #[test]
@@ -425,6 +549,7 @@ printf '%s\n' '{{"title":"{title}","summary":"基于 URL 的初步判断","key_p
     #[test]
     #[cfg(unix)]
     fn claude_cli_provider_reads_json_from_fake_command() {
+        let _env_guard = lock_env();
         let path = env::temp_dir().join(format!("reachnote-fake-claude-{}", std::process::id()));
         fake_cli(&path, "Claude 研究卡", "fake-claude");
         env::set_var("REACHNOTE_CLAUDE_CMD", &path);
@@ -443,7 +568,30 @@ printf '%s\n' '{{"title":"{title}","summary":"基于 URL 的初步判断","key_p
 
     #[test]
     #[cfg(unix)]
+    fn claude_cli_provider_sends_prompt_via_stdin() {
+        let _env_guard = lock_env();
+        let path = env::temp_dir().join(format!(
+            "reachnote-fake-claude-stdin-{}",
+            std::process::id()
+        ));
+        fake_cli_stdin_echo(&path, "provider adapter");
+        env::set_var("REACHNOTE_CLAUDE_CMD", &path);
+
+        let result = ProviderRunner {
+            timeout: Duration::from_secs(5),
+        }
+        .analyze(ProviderId::ClaudeCli, &sample_request())
+        .unwrap();
+
+        env::remove_var("REACHNOTE_CLAUDE_CMD");
+        let _ = fs::remove_file(path);
+        assert_eq!(result.summary, "marker-found");
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn codex_cli_provider_reads_json_from_fake_command() {
+        let _env_guard = lock_env();
         let path = env::temp_dir().join(format!("reachnote-fake-codex-{}", std::process::id()));
         fake_cli(&path, "Codex 研究卡", "fake-codex");
         env::set_var("REACHNOTE_CODEX_CMD", &path);
@@ -461,7 +609,28 @@ printf '%s\n' '{{"title":"{title}","summary":"基于 URL 的初步判断","key_p
     }
 
     #[test]
+    #[cfg(unix)]
+    fn codex_cli_provider_sends_prompt_via_stdin() {
+        let _env_guard = lock_env();
+        let path =
+            env::temp_dir().join(format!("reachnote-fake-codex-stdin-{}", std::process::id()));
+        fake_cli_stdin_echo(&path, "provider adapter");
+        env::set_var("REACHNOTE_CODEX_CMD", &path);
+
+        let result = ProviderRunner {
+            timeout: Duration::from_secs(5),
+        }
+        .analyze(ProviderId::CodexCli, &sample_request())
+        .unwrap();
+
+        env::remove_var("REACHNOTE_CODEX_CMD");
+        let _ = fs::remove_file(path);
+        assert_eq!(result.summary, "marker-found");
+    }
+
+    #[test]
     fn openai_compatible_provider_reads_local_mock_response() {
+        let _env_guard = lock_env();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let handle = thread::spawn(move || {

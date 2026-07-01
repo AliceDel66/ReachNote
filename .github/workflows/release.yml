@@ -1,0 +1,79 @@
+name: Release
+
+# 打 v* 标签即触发：在 macOS 与 Windows runner 上分别构建安装包，
+# 由 tauri-action 汇总到同一个 GitHub Release（草稿，人工确认后发布）。
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS 通用二进制：一个 .dmg 同时覆盖 Apple Silicon 与 Intel。
+          - platform: macos-latest
+            args: '--target universal-apple-darwin'
+            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+          # Windows：默认目标，产出 .msi 与 NSIS .exe 安装器。
+          - platform: windows-latest
+            args: ''
+            rust-targets: ''
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'ReachNote ${{ github.ref_name }}'
+          releaseBody: |
+            ReachNote 桌面端安装包 · desktop installers.
+
+            ### 下载 · Download
+            - **macOS** (Apple Silicon + Intel): `ReachNote_*_universal.dmg`
+            - **Windows** (x64): `ReachNote_*_x64-setup.exe` 或 `ReachNote_*_x64_en-US.msi`
+
+            ### 安装 · Install
+            安装包目前**未签名**（无 Apple / 微软证书），首次打开需手动放行：
+            The installers are **unsigned** for now, so the OS will warn on first launch.
+            - **macOS**：拖入「应用程序」后，右键图标 → 打开 → 再次点「打开」；或终端执行 `xattr -dr com.apple.quarantine /Applications/ReachNote.app`。
+            - **Windows**：SmartScreen 提示时点「更多信息 → 仍要运行」。
+
+            ### 运行前提 · Requirements
+            至少一个 AI 通道（本地 `claude` / `codex` CLI，或 OpenAI-compatible API）+ 一个 Notion Integration Token 与 Database ID。详见 README。
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

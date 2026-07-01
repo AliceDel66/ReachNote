@@ -4,9 +4,9 @@ Last updated: 2026-07-01
 
 ## Current Snapshot
 
-状态：Done / Agent-Reach web content reader feeds AnalysisRequest
+状态：Done / Analysis-to-Notion auto-sync hardened
 
-旧 Rust core 与 Tauri command 实现已清空后，当前已恢复 Rust workspace、`reachnote-core` crate、Tauri 2 app shell，并完成本地队列和结构化分析地基：core 任务领域类型、URL/domain 校验、AnalysisResult JSON 契约、SQLite `tasks` 表、`create_capture_task` / `list_capture_tasks` / `run_capture_task` Tauri commands。最新切片支持 `claude_cli`、`codex_cli`、`openai_compatible` 三种 provider，并已把 Agent-Reach web route / Jina Reader 读取到的正文写入 `AnalysisRequest.content_text`。当前仍没有 Notion 同步、后台调度器或 keychain。
+旧 Rust core 与 Tauri command 实现已清空后，当前已恢复 Rust workspace、`reachnote-core` crate、Tauri 2 app shell，并完成本地队列、结构化分析、GitHub repo 真实读取 fallback、Notion 同步地基、队列 in-progress 恢复和已分析任务补同步：core 任务领域类型、URL/domain 校验、AnalysisResult JSON 契约、Notion property 映射、SQLite `tasks` / `notion_settings` 表、`create_capture_task` / `list_capture_tasks` / `recover_interrupted_tasks` / `run_capture_task` / `retry_capture_task` / `sync_pending_analyzed_tasks` / `sync_capture_task` / `get_notion_settings` / `save_notion_settings` / `test_notion_connection` Tauri commands。`run_capture_task` 分析成功后已在后端继续同步 Notion；队列加载也会补扫 `Analyzed + analysis_json + no notion_page_id` 遗留任务。当前仍没有后台自动调度器或 OS keychain。
 
 ## Changed Files
 
@@ -22,16 +22,19 @@ Last updated: 2026-07-01
 - `src-tauri/src/main.rs`
 - `src-tauri/src/provider.rs`
 - `src-tauri/src/reader.rs`
+- `src-tauri/src/notion.rs`
 - `src-tauri/src/store.rs`
 - `src-tauri/tauri.conf.json`
 - `src-tauri/capabilities/default.json`
 
 ## Verification Status
 
-- `cargo test -p reachnote-core`：通过，13 个测试；覆盖 task status snake_case 序列化、URL 校验、domain 提取、shell status、provider id、AnalysisResult JSON 校验，以及读取正文/未读取正文两种 prompt。
-- `cargo test --manifest-path src-tauri/Cargo.toml`：通过，15 个测试；覆盖 Claude/Codex fake CLI adapter、OpenAI-compatible 本地 mock HTTP adapter、reader endpoint 拼接和本地 mock reader 成功读取。
+- `cargo test -p reachnote-core`：通过，20 个测试；覆盖 task status snake_case 序列化、URL 校验、domain 提取、shell status、provider id、AnalysisResult JSON 宽松解析、读取正文/未读取正文两种 prompt、Notion property 映射和 token mask。
+- `cargo test --manifest-path src-tauri/Cargo.toml`：通过，32 passed / 1 ignored；覆盖 Claude/Codex fake CLI adapter、stdin prompt、OpenAI-compatible 本地 mock HTTP adapter、reader endpoint、GitHub repo URL 解析、NotionClient mock HTTP、SQLite `notion_settings` round-trip、stale processing task recovery、active processing retry rejection、带 `analysis_json` 的失败任务同步重试路径和 orphan `Analyzed` 补同步路径。
 - `cargo check --manifest-path src-tauri/Cargo.toml`：通过。
-- `REACHNOTE_AGENT_REACH_WEB_READER_BASE_URL=http://127.0.0.1:18089 REACHNOTE_CLAUDE_CMD=/tmp/reachnote-fake-claude-reader-check REACHNOTE_AI_TIMEOUT_SECS=10 pnpm tauri dev`：通过，Tauri dev 编译并运行 `target/debug/reachnote-app`；采集合法 URL 后最新任务写入 `analyzed`，标题为 `Reader Content OK`，证明 reader 正文进入 provider prompt。
+- 真实 E2E：`REACHNOTE_CLAUDE_CMD=/opt/homebrew/bin/claude REACHNOTE_AI_TIMEOUT_SECS=240 REACHNOTE_READER_TIMEOUT_SECS=60 cargo test --manifest-path src-tauri/Cargo.toml real_e2e_fe_fidelity_kit_claude_to_notion -- --ignored --nocapture --test-threads=1`：通过，1 passed，真实创建 Notion page `390c9b0c-3c3c-81d2-b04d-f0cd5b8859bb`。
+- Tauri dev Notion UI smoke：通过。使用本地 mock reader、fake Claude CLI 和 SQLite `notion_settings`，从采集页提交非敏感 `example.com` smoke URL 后，验证时该任务写为 `synced`，包含 `notion_page_id` / `synced_at`；Notion API 读取 page 返回 HTTP 200，Title/URL/Status/Score/Source Type/Tags/AI Model 均匹配。
+- Tauri dev stale recovery smoke：通过。向 app data SQLite 插入超过 300 秒未更新的测试 `reading` 任务后刷新真实 Tauri 窗口，`recover_interrupted_tasks` 将其写为 `failed/read_failed`，队列页显示恢复错误原因和 `重试` 按钮；测试 row 已删除。
 
 ## Progress Log
 
@@ -62,3 +65,16 @@ Last updated: 2026-07-01
 - `AnalysisRequest` 新增 `content_text` / `content_reader`；`build_analysis_prompt` 在读取成功时要求基于正文生成研究卡，在未读取时要求明确待复核，正文输入截断到 12000 字符。
 - `run_capture_task` 状态推进变为 `Queued -> Reading -> Analyzing -> Analyzed/Failed`；reader 失败会写 `ReadFailed` 或 `NetworkFailed`，不会继续调用 provider。
 - 未闭环风险：Agent-Reach CLI 本机实际没有 `read` 子命令，本轮按 agent-reach skill 的 web route/Jina Reader 事实接入；尚未保存原文摘录到 SQLite，也未接 Notion、OS keychain 或后台调度器。
+- 新增本地 Notion 配置：`TaskStore` 建表 `notion_settings`，`get_notion_settings` / `save_notion_settings` singleton round-trip；Tauri 设置页命令返回 masked `NotionSettingsView`，不回传明文 token。
+- `src-tauri/src/notion.rs`：`NotionClient::from_env()` 改为 `NotionClient::from_settings(NotionSettings)`；新增 `test_connection` 读 `/v1/databases/{id}`；`create_page` 继续走 `2022-06-28 + parent.database_id`。
+- `sync_capture_task`：只同步已分析或带 `analysis_json` 的失败任务；状态写 `Syncing`，从 SQLite local settings 读 token/database，成功写 `Synced/notion_page_id/synced_at`，失败保留本地研究卡并写 `error_kind/error_message`。
+- 真实数据修复：Jina Reader 对 `github.com` 真实返回 451，因此 `AgentReachWebReader` 对 GitHub repo URL 改走 GitHub API metadata + README raw fallback，reader 标记为 `GitHub API / README`。
+- 真实 E2E 验证：`AliceDel66/fe-fidelity-kit` 通过 GitHub fallback 读取真实内容，真实 Claude CLI 生成非 fake `AnalysisResult`，真实 Notion API 创建 page `390c9b0c-3c3c-81d2-b04d-f0cd5b8859bb`。
+- 未闭环风险：Notion token 当前按用户本轮要求存 SQLite，尚未迁移 OS keychain；Computer Use 插件仍不能绑定 debug app，桌面 PASS 依赖 macOS Accessibility fallback，见 `desktop-qa.md`。
+- Notion 最小同步收尾：`sync_capture_task` 已在 Tauri dev 真实窗口中由采集页自动触发，完成 `Analyzed -> Syncing -> Synced`；失败路径由 NotionClient 分类为 `notion_unauthorized` / `schema_mismatch` / `network_failed` 并保留本地研究卡。
+- 本轮验证：`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml`、`git diff --check` 全部通过。
+- 第七刀实现队列 in-progress 恢复与重试调度：`TaskStore::recover_stale_processing_tasks` 恢复 stale `Reading/Analyzing/Syncing`，Tauri command `recover_interrupted_tasks` 默认阈值 300 秒（可用 `REACHNOTE_STALE_TASK_SECS` 覆盖），`retry_capture_task` 统一处理 queued、failed、analyzed、synced 和 active processing 任务。
+- 恢复策略：中断任务不清空 `analysis_json` / `notion_page_id` / `synced_at`；`reading/analyzing/syncing` 均落为 `failed/read_failed` 并写入面向用户的阶段性错误文案，方便队列页直接提示下一步。
+- 本轮验证：`cargo fmt`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo test -p reachnote-core`、`pnpm typecheck`、`pnpm build`、`cargo check --manifest-path src-tauri/Cargo.toml` 均通过；Tauri dev + AX fallback stale recovery smoke 通过。
+- Bugfix：修复 `run_capture_task` 分析成功后只写 `Analyzed`、同步依赖前端继续发起导致 reload/HMR/关闭后任务停在 `已分析` 的问题。后端新增 `run_and_sync_capture_task_blocking` 和 `sync_pending_analyzed_tasks`，`TaskStore::list_pending_sync_tasks` 只选 `Analyzed + analysis_json + no notion_page_id`。
+- 验证：截图中的 `task-1782878357-900342000-78578-1` 经 Tauri dev reload 补同步为 `synced`，写入 Notion page id `390c9b0c-3c3c-81b7-8332-e4a8b4413cb6`。
