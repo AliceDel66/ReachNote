@@ -1,0 +1,161 @@
+{
+  "bilibili": {
+    "active_backend": "B站搜索 API",
+    "backends": [
+      "bili-cli",
+      "OpenCLI",
+      "B站搜索 API"
+    ],
+    "message": "B站搜索 API 可达（仅搜索，curl 直连）。完整功能建议安装 bili-cli：pipx install bilibili-cli",
+    "name": "B站视频、字幕和搜索",
+    "status": "ok",
+    "tier": 1
+  },
+  "exa_search": {
+    "active_backend": "Exa via mcporter",
+    "backends": [
+      "Exa via mcporter"
+    ],
+    "message": "全网语义搜索可用（免费，无需 API Key）",
+    "name": "全网语义搜索",
+    "status": "ok",
+    "tier": 0
+  },
+  "facebook": {
+    "active_backend": null,
+    "backends": [
+      "OpenCLI"
+    ],
+    "message": "未安装 Facebook 帖子、主页和群组 后端。安装：\n  agent-reach install --channels opencli\n然后在 Chrome 里登录 facebook.com",
+    "name": "Facebook 帖子、主页和群组",
+    "status": "off",
+    "tier": 1
+  },
+  "github": {
+    "active_backend": "gh CLI",
+    "backends": [
+      "gh CLI"
+    ],
+    "message": "完整可用（读取、搜索、Fork、Issue、PR 等）",
+    "name": "GitHub 仓库和代码",
+    "status": "ok",
+    "tier": 0
+  },
+  "instagram": {
+    "active_backend": null,
+    "backends": [
+      "OpenCLI"
+    ],
+    "message": "未安装 Instagram 用户、主页和指定用户帖子 后端。安装：\n  agent-reach install --channels opencli\n然后在 Chrome 里登录 instagram.com",
+    "name": "Instagram 用户、主页和指定用户帖子",
+    "status": "off",
+    "tier": 1
+  },
+  "linkedin": {
+    "active_backend": null,
+    "backends": [
+      "linkedin-scraper-mcp",
+      "Jina Reader"
+    ],
+    "message": "mcporter 已装但 LinkedIn MCP 未配置。运行：\n  pip install linkedin-scraper-mcp\n  mcporter config add linkedin http://localhost:3000/mcp",
+    "name": "LinkedIn 职业社交",
+    "status": "off",
+    "tier": 2
+  },
+  "reddit": {
+    "active_backend": null,
+    "backends": [
+      "OpenCLI",
+      "rdt-cli"
+    ],
+    "message": "未安装任何 Reddit 后端。注意：Reddit 没有零配置路径（匿名 .json 已被封，官方 API 需人工审批），必须用登录态。推荐：\n  桌面：agent-reach install --channels opencli\n       （复用 Chrome 登录态，登录过 reddit.com 即可用）\n  服务器/存量：pipx install 'git+https://github.com/public-clis/rdt-cli.git@5e4fb3720d5c174e976cd425ccc3b879d52cac66'\n       然后 `rdt login` 或手动写入 Cookie（见 doctor 提示）\n中国大陆访问 Reddit 需要代理",
+    "name": "Reddit 帖子和评论",
+    "status": "off",
+    "tier": 1
+  },
+  "rss": {
+    "active_backend": "feedparser",
+    "backends": [
+      "feedparser"
+    ],
+    "message": "可读取 RSS/Atom 源",
+    "name": "RSS/Atom 订阅源",
+    "status": "ok",
+    "tier": 0
+  },
+  "twitter": {
+    "active_backend": null,
+    "backends": [
+      "twitter-cli",
+      "OpenCLI",
+      "bird CLI (legacy)"
+    ],
+    "message": "Twitter CLI 未安装。安装方式：\n  pipx install twitter-cli\n或：\n  uv tool install twitter-cli",
+    "name": "Twitter/X 推文",
+    "status": "warn",
+    "tier": 1
+  },
+  "v2ex": {
+    "active_backend": "V2EX API (public)",
+    "backends": [
+      "V2EX API (public)"
+    ],
+    "message": "公开 API 可用（热门主题、节点浏览、主题详情、用户信息）",
+    "name": "V2EX 节点、主题与回复",
+    "status": "ok",
+    "tier": 0
+  },
+  "web": {
+    "active_backend": "Jina Reader",
+    "backends": [
+      "Jina Reader"
+    ],
+    "message": "通过 Jina Reader 读取任意网页（curl https://r.jina.ai/URL）",
+    "name": "任意网页",
+    "status": "ok",
+    "tier": 0
+  },
+  "xiaohongshu": {
+    "active_backend": null,
+    "backends": [
+      "OpenCLI",
+      "xiaohongshu-mcp",
+      "xhs-cli (xiaohongshu-cli)"
+    ],
+    "message": "未安装任何小红书后端。推荐：\n  桌面：agent-reach install --channels opencli\n       （复用 Chrome 登录态，刷过小红书即零配置可用）\n  服务器：xiaohongshu-mcp（自带无头浏览器+扫码登录）：https://github.com/xpzouying/xiaohongshu-mcp",
+    "name": "小红书笔记",
+    "status": "off",
+    "tier": 1
+  },
+  "xiaoyuzhou": {
+    "active_backend": null,
+    "backends": [
+      "groq-whisper",
+      "ffmpeg"
+    ],
+    "message": "需要 ffmpeg（音频转码和切片）。安装：\n  Ubuntu/Debian: apt install -y ffmpeg\n  macOS: brew install ffmpeg",
+    "name": "小宇宙播客转文字",
+    "status": "off",
+    "tier": 1
+  },
+  "xueqiu": {
+    "active_backend": null,
+    "backends": [
+      "Xueqiu API (需要登录 Cookie)"
+    ],
+    "message": "Xueqiu API 连接失败：HTTP Error 400: 。请先登录雪球后运行：agent-reach configure --from-browser chrome",
+    "name": "雪球股票行情与社区动态",
+    "status": "warn",
+    "tier": 1
+  },
+  "youtube": {
+    "active_backend": null,
+    "backends": [
+      "yt-dlp"
+    ],
+    "message": "yt-dlp 未安装。安装：pip install yt-dlp",
+    "name": "YouTube 视频和字幕",
+    "status": "off",
+    "tier": 0
+  }
+}

@@ -8,7 +8,9 @@
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "desktop:qa:build": "tauri build --debug --bundles app --no-sign --config src-tauri/tauri.qa.conf.json",
+    "desktop:qa:smoke": "scripts/desktop-smoke-qa.sh"
   },
   "dependencies": {
     "@heroui/react": "^2.8.5",

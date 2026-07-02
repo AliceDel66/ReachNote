@@ -4,9 +4,9 @@ Last updated: 2026-07-01
 
 ## Current Snapshot
 
-状态：Done / Analysis-to-Notion auto-sync hardened
+状态：Done / Slice 3 template registry backend
 
-旧 Rust core 与 Tauri command 实现已清空后，当前已恢复 Rust workspace、`reachnote-core` crate、Tauri 2 app shell，并完成本地队列、结构化分析、GitHub repo 真实读取 fallback、Notion 同步地基、队列 in-progress 恢复和已分析任务补同步：core 任务领域类型、URL/domain 校验、AnalysisResult JSON 契约、Notion property 映射、SQLite `tasks` / `notion_settings` 表、`create_capture_task` / `list_capture_tasks` / `recover_interrupted_tasks` / `run_capture_task` / `retry_capture_task` / `sync_pending_analyzed_tasks` / `sync_capture_task` / `get_notion_settings` / `save_notion_settings` / `test_notion_connection` Tauri commands。`run_capture_task` 分析成功后已在后端继续同步 Notion；队列加载也会补扫 `Analyzed + analysis_json + no notion_page_id` 遗留任务。当前仍没有后台自动调度器或 OS keychain。
+旧 Rust core 与 Tauri command 实现已清空后，当前已恢复 Rust workspace、`reachnote-core` crate、Tauri 2 app shell，并完成本地队列、结构化分析、GitHub repo 真实读取 fallback、Notion 同步地基、队列 in-progress 恢复、已分析任务补同步、Slice 1 app settings、Slice 2 Agent-Reach 平台能力矩阵和 Slice 3 模板注册/选择地基：core 任务领域类型、URL/domain 校验、AnalysisResult JSON 契约、Notion property 映射、`platform::normalize_doctor_output`、`template::BUILT_IN_TEMPLATES`、SQLite `tasks` / `notion_settings` / `app_settings` / `source_capability_snapshots` 表、`create_capture_task` / `list_templates` / `list_capture_tasks` / `recover_interrupted_tasks` / `run_capture_task` / `retry_capture_task` / `sync_pending_analyzed_tasks` / `sync_capture_task` / `get_notion_settings` / `save_notion_settings` / `test_notion_connection` / `get_app_settings` / `save_app_settings` / `get_environment_status` / `run_agent_reach_doctor` Tauri commands。`get_environment_status` 只读取最近平台快照，不同步跑 doctor；doctor 只在 UI 显式刷新或首次 onboarding 自动触发时运行。当前仍没有后台自动调度器、OS keychain 或真实按平台路由读取。
 
 ## Changed Files
 
@@ -15,7 +15,10 @@ Last updated: 2026-07-01
 - `crates/core/Cargo.toml`
 - `crates/core/src/analysis.rs`
 - `crates/core/src/lib.rs`
+- `crates/core/src/platform.rs`
+- `crates/core/src/testdata/agent_reach_doctor.sample.json`
 - `crates/core/src/task.rs`
+- `crates/core/src/template.rs`
 - `src-tauri/Cargo.toml`
 - `src-tauri/build.rs`
 - `src-tauri/src/lib.rs`
@@ -29,8 +32,8 @@ Last updated: 2026-07-01
 
 ## Verification Status
 
-- `cargo test -p reachnote-core`：通过，20 个测试；覆盖 task status snake_case 序列化、URL 校验、domain 提取、shell status、provider id、AnalysisResult JSON 宽松解析、读取正文/未读取正文两种 prompt、Notion property 映射和 token mask。
-- `cargo test --manifest-path src-tauri/Cargo.toml`：通过，32 passed / 1 ignored；覆盖 Claude/Codex fake CLI adapter、stdin prompt、OpenAI-compatible 本地 mock HTTP adapter、reader endpoint、GitHub repo URL 解析、NotionClient mock HTTP、SQLite `notion_settings` round-trip、stale processing task recovery、active processing retry rejection、带 `analysis_json` 的失败任务同步重试路径和 orphan `Analyzed` 补同步路径。
+- `cargo test -p reachnote-core`：通过，26 个测试；覆盖 task status snake_case 序列化、URL 校验、domain 提取、shell status、provider id、AnalysisResult JSON 宽松解析、读取正文/未读取正文两种 prompt、模板 profile 注入、旧 `article` alias、Notion property 映射、token mask、Agent-Reach doctor fixture 15 平台归一化和畸形 JSON parse error。
+- `cargo test --manifest-path src-tauri/Cargo.toml`：通过，41 passed / 1 ignored；覆盖 Claude/Codex fake CLI adapter、stdin prompt、OpenAI-compatible 本地 mock HTTP adapter、reader endpoint、GitHub repo URL 解析、NotionClient mock HTTP、SQLite `notion_settings` round-trip、SQLite `app_settings` 新安装/迁移/round-trip/非法 provider/非法模板、注册模板 ID 保存、`source_capability_snapshots` 最新快照读取、fake `agent-reach doctor --json` 注入、doctor parse error、stale processing task recovery、active processing retry rejection、带 `analysis_json` 的失败任务同步重试路径和 orphan `Analyzed` 补同步路径。
 - `cargo check --manifest-path src-tauri/Cargo.toml`：通过。
 - 真实 E2E：`REACHNOTE_CLAUDE_CMD=/opt/homebrew/bin/claude REACHNOTE_AI_TIMEOUT_SECS=240 REACHNOTE_READER_TIMEOUT_SECS=60 cargo test --manifest-path src-tauri/Cargo.toml real_e2e_fe_fidelity_kit_claude_to_notion -- --ignored --nocapture --test-threads=1`：通过，1 passed，真实创建 Notion page `390c9b0c-3c3c-81d2-b04d-f0cd5b8859bb`。
 - Tauri dev Notion UI smoke：通过。使用本地 mock reader、fake Claude CLI 和 SQLite `notion_settings`，从采集页提交非敏感 `example.com` smoke URL 后，验证时该任务写为 `synced`，包含 `notion_page_id` / `synced_at`；Notion API 读取 page 返回 HTTP 200，Title/URL/Status/Score/Source Type/Tags/AI Model 均匹配。
@@ -78,3 +81,11 @@ Last updated: 2026-07-01
 - 本轮验证：`cargo fmt`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo test -p reachnote-core`、`pnpm typecheck`、`pnpm build`、`cargo check --manifest-path src-tauri/Cargo.toml` 均通过；Tauri dev + AX fallback stale recovery smoke 通过。
 - Bugfix：修复 `run_capture_task` 分析成功后只写 `Analyzed`、同步依赖前端继续发起导致 reload/HMR/关闭后任务停在 `已分析` 的问题。后端新增 `run_and_sync_capture_task_blocking` 和 `sync_pending_analyzed_tasks`，`TaskStore::list_pending_sync_tasks` 只选 `Analyzed + analysis_json + no notion_page_id`。
 - 验证：截图中的 `task-1782878357-900342000-78578-1` 经 Tauri dev reload 补同步为 `synced`，写入 Notion page id `390c9b0c-3c3c-81b7-8332-e4a8b4413cb6`。
+- Slice 1 backend：`TaskStore::migrate` 新增 `app_settings` singleton；新库默认 `onboarding_completed=false`，既有库只要存在 `tasks` 或 `notion_settings` 就迁移为 `onboarding_completed=true`，避免升级后卡在首启动。默认 provider/template/shortcut 分别为 `claude_cli` / `article` / `CommandOrControl+Shift+R`，已有 Notion 配置时默认 destination 为 `notion`。
+- Slice 1 commands：新增 `get_app_settings`、`save_app_settings`、`get_environment_status`。环境检测只读本机 CLI/PATH/env：检测 Claude CLI、Codex CLI、OpenAI-compatible base/model 和 agent-reach/version，并把 JSON 快照写入 `app_settings.last_environment_check_json`；不打印 token/API key。
+- Slice 1 验证：`cargo test --manifest-path src-tauri/Cargo.toml` 35 passed / 1 ignored，`cargo check --manifest-path src-tauri/Cargo.toml` 通过；app data SQLite 确认现有安装已生成 `app_settings` 和环境快照。
+- Slice 2 core：新增 `crates/core/src/platform.rs`，纯函数 `normalize_doctor_output` 解析 Agent-Reach v1.5.0 真实 doctor 扁平 map，输出 `SourcePlatformStatus`，保守映射 `availability` / `action`，并保留完整 `message` 与紧凑 `summary`。fixture 单测覆盖 15 key、GitHub/Web read_content、Twitter needs_install、Xueqiu needs_login、YouTube needs_install/not_supported_yet 和畸形 JSON。
+- Slice 2 store/command：新增 `source_capability_snapshots` 表与 `save_capability_snapshot` / `get_latest_capability_snapshot`；新增 `run_agent_reach_doctor`，支持 `REACHNOTE_AGENT_REACH_CMD` fake 注入和 `REACHNOTE_DOCTOR_TIMEOUT_SECS`，stdout/stderr 并发读取防止管道死锁。`get_environment_status` 改为只读最近 normalized 快照并暴露 `source_platforms_checked` / `source_platforms_updated_at` / `source_platforms_error`。
+- Slice 3 core：新增 `crates/core/src/template.rs` 静态注册表，注册 `web_article`、`github_project`、`video_note`、`rss_digest`、`platform_discussion`，所有模板共用 `research_card_v1` 输出 schema。旧 `article` canonical 为 `web_article`，用于兼容既有 app_settings/tasks。
+- Slice 3 command/store：`create_capture_task` 新增可选 `template_id` 参数，缺省时按 URL 推荐 `github_project` / `video_note` / `rss_digest` / `platform_discussion` / `web_article`；`save_app_settings` 保存默认模板时 canonical 化；`TaskStore` 不再硬编码只允许 `article` template，而是校验注册表；新空库默认 template 为 `web_article`。
+- Slice 3 prompt：`build_analysis_prompt` 读取注册模板并注入模板名、模板意图和 shared schema 约束，不拆分 `AnalysisResult`。

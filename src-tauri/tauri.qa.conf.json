@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ReachNote QA",
+  "identifier": "com.reachnote.qa",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "ReachNote QA",
+        "width": 1180,
+        "height": 780,
+        "minWidth": 900,
+        "minHeight": 680
+      }
+    ]
+  },
+  "bundle": {
+    "targets": "app",
+    "shortDescription": "ReachNote QA desktop smoke build",
+    "longDescription": "ReachNote QA is an isolated desktop smoke build for validating onboarding, settings, queue and macOS shell behavior without sharing the production app identity or app data."
+  },
+  "plugins": {
+    "updater": {
+      "active": false
+    }
+  }
+}

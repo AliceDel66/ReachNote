@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{env, sync::Arc};
 
@@ -5,9 +7,17 @@ use reachnote_core::analysis::{parse_analysis_result, AnalysisRequest, ProviderI
 use reachnote_core::notion::{
     build_notion_properties, NotionSettings, NotionSettingsView, NOTION_API_VERSION,
 };
+use reachnote_core::platform::{normalize_doctor_output, SourcePlatformStatus};
 use reachnote_core::task::{validate_article_url, ErrorKind, Task, TaskStatus};
+use reachnote_core::template::{
+    built_in_templates, canonical_template_id, suggest_template_id_for_url, ResearchTemplate,
+};
+use serde::Serialize;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, State};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use wait_timeout::ChildExt;
 
 mod notion;
 mod provider;
@@ -17,7 +27,38 @@ mod store;
 use notion::NotionClient;
 use provider::ProviderRunner;
 use reader::AgentReachWebReader;
-use store::TaskStore;
+use store::{AppSettings, TaskStore};
+
+const TRAY_MENU_SHOW: &str = "show-main-window";
+const TRAY_MENU_HIDE: &str = "hide-main-window";
+const TRAY_MENU_QUIT: &str = "quit-reachnote";
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct AiProviderStatus {
+    id: String,
+    label: String,
+    ready: bool,
+    detail: String,
+    is_recommended: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct AgentReachStatus {
+    installed: bool,
+    version: Option<String>,
+    detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct EnvironmentStatus {
+    ai_providers: Vec<AiProviderStatus>,
+    agent_reach: AgentReachStatus,
+    recommended_provider_id: Option<String>,
+    source_platforms: Vec<SourcePlatformStatus>,
+    source_platforms_checked: bool,
+    source_platforms_updated_at: Option<String>,
+    source_platforms_error: Option<String>,
+}
 
 #[tauri::command]
 fn shell_status() -> reachnote_core::ShellStatus {
@@ -30,6 +71,7 @@ fn create_capture_task(
     url: String,
     note: Option<String>,
     provider_id: Option<String>,
+    template_id: Option<String>,
 ) -> Result<Task, String> {
     let validated = validate_article_url(&url)
         .map_err(|kind| command_error(kind, "请输入合法的 http(s) 文章 URL"))?;
@@ -42,6 +84,14 @@ fn create_capture_task(
         })?,
         None => ProviderId::ClaudeCli,
     };
+    let template_id = match normalize_optional_text(template_id) {
+        Some(value) => canonical_template_id(&value)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                command_error(ErrorKind::SchemaMismatch, &format!("未知模板: {value}"))
+            })?,
+        None => suggest_template_id_for_url(&validated.url).to_string(),
+    };
     let normalized_note = note
         .map(|value| value.chars().take(500).collect::<String>())
         .map(|value| value.trim().to_string())
@@ -51,7 +101,7 @@ fn create_capture_task(
         id: create_task_id(),
         url: validated.url,
         source_type: "article".to_string(),
-        template_id: "article".to_string(),
+        template_id,
         status: TaskStatus::Queued,
         title: None,
         source_domain: Some(validated.source_domain),
@@ -76,6 +126,11 @@ fn create_capture_task(
 }
 
 #[tauri::command]
+fn list_templates() -> Vec<ResearchTemplate> {
+    built_in_templates().to_vec()
+}
+
+#[tauri::command]
 fn list_capture_tasks(store: State<'_, Arc<TaskStore>>) -> Result<Vec<Task>, String> {
     store
         .list_tasks()
@@ -94,6 +149,75 @@ fn recover_interrupted_tasks(
     store
         .recover_stale_processing_tasks(&now, stale_after_seconds)
         .map_err(|error| command_error(error.kind, &error.message))
+}
+
+#[tauri::command]
+fn get_app_settings(store: State<'_, Arc<TaskStore>>) -> Result<AppSettings, String> {
+    store
+        .get_app_settings()
+        .map_err(|error| command_error(error.kind, &error.message))
+}
+
+#[tauri::command]
+fn save_app_settings(
+    store: State<'_, Arc<TaskStore>>,
+    onboarding_completed: Option<bool>,
+    default_provider_id: Option<String>,
+    default_template_id: Option<String>,
+    default_destination_id: Option<String>,
+    global_shortcut: Option<String>,
+    global_shortcut_enabled: Option<bool>,
+) -> Result<AppSettings, String> {
+    let mut settings = store
+        .get_app_settings()
+        .map_err(|error| command_error(error.kind, &error.message))?;
+    if let Some(value) = onboarding_completed {
+        settings.onboarding_completed = value;
+    }
+    if let Some(value) = normalize_optional_text(default_provider_id) {
+        settings.default_provider_id = Some(value);
+    }
+    if let Some(value) = normalize_optional_text(default_template_id) {
+        let template_id = canonical_template_id(&value).ok_or_else(|| {
+            command_error(ErrorKind::SchemaMismatch, &format!("未知默认模板: {value}"))
+        })?;
+        settings.default_template_id = Some(template_id.to_string());
+    }
+    if let Some(value) = normalize_optional_text(default_destination_id) {
+        settings.default_destination_id = Some(value);
+    }
+    if let Some(value) = normalize_optional_text(global_shortcut) {
+        settings.global_shortcut = Some(value);
+    }
+    if let Some(value) = global_shortcut_enabled {
+        settings.global_shortcut_enabled = value;
+    }
+    settings.updated_at = current_unix_timestamp();
+    store
+        .save_app_settings(&settings)
+        .map_err(|error| command_error(error.kind, &error.message))?;
+    Ok(settings)
+}
+
+#[tauri::command]
+fn get_environment_status(store: State<'_, Arc<TaskStore>>) -> Result<EnvironmentStatus, String> {
+    let status = detect_environment_status(&store);
+    if let Ok(snapshot) = serde_json::to_string(&status) {
+        store
+            .save_environment_snapshot(&snapshot, &current_unix_timestamp())
+            .map_err(|error| command_error(error.kind, &error.message))?;
+    }
+    Ok(status)
+}
+
+#[tauri::command]
+async fn run_agent_reach_doctor(
+    store: State<'_, Arc<TaskStore>>,
+) -> Result<Vec<SourcePlatformStatus>, String> {
+    let store = Arc::clone(store.inner());
+    tauri::async_runtime::spawn_blocking(move || run_agent_reach_doctor_blocking(&store))
+        .await
+        .map_err(|error| format!("Agent-Reach 平台检测任务执行失败: {error}"))?
 }
 
 #[tauri::command]
@@ -455,6 +579,50 @@ fn restore_main_window_from_app(app: &tauri::AppHandle) -> Result<(), String> {
     restore_main_window(&window)
 }
 
+fn setup_reachnote_tray(app: &tauri::App) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, TRAY_MENU_SHOW, "显示 ReachNote", true, None::<&str>)?;
+    let hide = MenuItem::with_id(app, TRAY_MENU_HIDE, "隐藏窗口", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let quit = MenuItem::with_id(app, TRAY_MENU_QUIT, "退出 ReachNote", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &hide, &separator, &quit])?;
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
+
+    TrayIconBuilder::with_id("reachnote-status-item")
+        .tooltip("ReachNote")
+        .icon(icon)
+        .icon_as_template(true)
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_MENU_SHOW => {
+                let _ = restore_main_window_from_app(app);
+            }
+            TRAY_MENU_HIDE => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+            TRAY_MENU_QUIT => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let _ = restore_main_window_from_app(tray.app_handle());
+            }
+        })
+        .build(app)?;
+
+    Ok(())
+}
+
 pub fn run() {
     let app = tauri::Builder::default()
         .setup(|app| {
@@ -467,17 +635,23 @@ pub fn run() {
             // Arc 注入：阻塞命令要把 store 克隆进 spawn_blocking 闭包（'static + Send），
             // 同步命令仍可经 State -> Arc -> TaskStore 自动解引用调用。
             app.manage(Arc::new(store));
+            setup_reachnote_tray(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             shell_status,
             create_capture_task,
+            list_templates,
             list_capture_tasks,
             recover_interrupted_tasks,
             run_capture_task,
             retry_capture_task,
             sync_pending_analyzed_tasks,
             sync_capture_task,
+            get_app_settings,
+            save_app_settings,
+            get_environment_status,
+            run_agent_reach_doctor,
             get_notion_settings,
             save_notion_settings,
             test_notion_connection,
@@ -529,6 +703,306 @@ fn default_stale_task_seconds() -> u64 {
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(300)
+}
+
+fn default_doctor_timeout() -> Duration {
+    Duration::from_secs(
+        env::var("REACHNOTE_DOCTOR_TIMEOUT_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(60),
+    )
+}
+
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn run_agent_reach_doctor_blocking(store: &TaskStore) -> Result<Vec<SourcePlatformStatus>, String> {
+    let command = resolve_agent_reach_command().ok_or_else(|| {
+        command_error(
+            ErrorKind::ProviderUnavailable,
+            "未找到 agent-reach；请先安装 Agent-Reach，或设置 REACHNOTE_AGENT_REACH_CMD 指向可执行文件",
+        )
+    })?;
+
+    run_agent_reach_doctor_with_command(store, &command, default_doctor_timeout())
+}
+
+fn run_agent_reach_doctor_with_command(
+    store: &TaskStore,
+    command: &Path,
+    timeout: Duration,
+) -> Result<Vec<SourcePlatformStatus>, String> {
+    let doctor_json = run_doctor_process(command, timeout)?;
+    let platforms = normalize_doctor_output(&doctor_json)
+        .map_err(|error| command_error(ErrorKind::ParseFailed, &error.message))?;
+    let normalized_json = serde_json::to_string(&platforms).map_err(|error| {
+        command_error(
+            ErrorKind::ParseFailed,
+            &format!("平台能力归一化结果序列化失败: {error}"),
+        )
+    })?;
+    let version = agent_reach_version_for_command(command);
+    store
+        .save_capability_snapshot(
+            version.as_deref(),
+            &doctor_json,
+            &normalized_json,
+            &current_unix_timestamp(),
+        )
+        .map_err(|error| command_error(error.kind, &error.message))?;
+
+    Ok(platforms)
+}
+
+fn run_doctor_process(command: &Path, timeout: Duration) -> Result<String, String> {
+    let mut child = Command::new(command)
+        .arg("doctor")
+        .arg("--json")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| {
+            command_error(
+                ErrorKind::ProviderUnavailable,
+                &format!("agent-reach doctor 启动失败: {error}"),
+            )
+        })?;
+
+    let mut stdout_pipe = child.stdout.take().expect("stdout 已配置为 piped");
+    let mut stderr_pipe = child.stderr.take().expect("stderr 已配置为 piped");
+    let stdout_reader = std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut stdout_pipe, &mut buffer);
+        buffer
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut stderr_pipe, &mut buffer);
+        buffer
+    });
+
+    let exit_status = match child.wait_timeout(timeout).map_err(|error| {
+        command_error(
+            ErrorKind::ProviderUnavailable,
+            &format!("agent-reach doctor 等待失败: {error}"),
+        )
+    })? {
+        Some(status) => Some(status),
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            None
+        }
+    };
+
+    let stdout_buffer = stdout_reader.join().unwrap_or_default();
+    let stderr_buffer = stderr_reader.join().unwrap_or_default();
+    let Some(status) = exit_status else {
+        return Err(command_error(
+            ErrorKind::NetworkFailed,
+            &format!(
+                "agent-reach doctor 在 {} 秒内没有返回结果，已停止检测",
+                timeout.as_secs()
+            ),
+        ));
+    };
+
+    if !status.success() {
+        return Err(command_error(
+            ErrorKind::ProviderUnavailable,
+            &format!(
+                "agent-reach doctor 执行失败: {}",
+                truncate_for_message(&String::from_utf8_lossy(&stderr_buffer))
+            ),
+        ));
+    }
+
+    String::from_utf8(stdout_buffer).map_err(|error| {
+        command_error(
+            ErrorKind::ParseFailed,
+            &format!("agent-reach doctor 输出不是 UTF-8 文本: {error}"),
+        )
+    })
+}
+
+fn detect_environment_status(store: &TaskStore) -> EnvironmentStatus {
+    let mut ai_providers = vec![
+        detect_cli_provider("claude_cli", "Claude CLI", "REACHNOTE_CLAUDE_CMD", "claude"),
+        detect_cli_provider("codex_cli", "Codex CLI", "REACHNOTE_CODEX_CMD", "codex"),
+        detect_openai_compatible_provider(),
+    ];
+    let recommended_provider_id = ai_providers
+        .iter()
+        .find(|provider| provider.ready)
+        .map(|provider| provider.id.clone());
+    for provider in &mut ai_providers {
+        provider.is_recommended = recommended_provider_id.as_deref() == Some(provider.id.as_str());
+    }
+
+    let (
+        source_platforms,
+        source_platforms_checked,
+        source_platforms_updated_at,
+        source_platforms_error,
+    ) = latest_source_platforms(store);
+
+    EnvironmentStatus {
+        ai_providers,
+        agent_reach: detect_agent_reach_status(),
+        recommended_provider_id,
+        source_platforms,
+        source_platforms_checked,
+        source_platforms_updated_at,
+        source_platforms_error,
+    }
+}
+
+fn latest_source_platforms(
+    store: &TaskStore,
+) -> (
+    Vec<SourcePlatformStatus>,
+    bool,
+    Option<String>,
+    Option<String>,
+) {
+    match store.get_latest_capability_snapshot() {
+        Ok(Some(snapshot)) => {
+            match serde_json::from_str::<Vec<SourcePlatformStatus>>(&snapshot.normalized_json) {
+                Ok(platforms) => (platforms, true, Some(snapshot.created_at), None),
+                Err(error) => (
+                    Vec::new(),
+                    true,
+                    Some(snapshot.created_at),
+                    Some(format!("最近平台能力快照解析失败: {error}")),
+                ),
+            }
+        }
+        Ok(None) => (Vec::new(), false, None, None),
+        Err(error) => (
+            Vec::new(),
+            false,
+            None,
+            Some(format!("读取平台能力快照失败: {}", error.message)),
+        ),
+    }
+}
+
+fn detect_cli_provider(
+    id: &str,
+    label: &str,
+    env_key: &str,
+    default_command: &str,
+) -> AiProviderStatus {
+    let configured = env::var(env_key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let command = configured.as_deref().unwrap_or(default_command);
+    let resolved = resolve_command(command);
+
+    match resolved {
+        Some(path) => AiProviderStatus {
+            id: id.to_string(),
+            label: label.to_string(),
+            ready: true,
+            detail: format!("已检测到 {}", path.display()),
+            is_recommended: false,
+        },
+        None => AiProviderStatus {
+            id: id.to_string(),
+            label: label.to_string(),
+            ready: false,
+            detail: format!("未找到 `{command}`；可安装 {label} 或设置 {env_key}"),
+            is_recommended: false,
+        },
+    }
+}
+
+fn detect_openai_compatible_provider() -> AiProviderStatus {
+    let has_base_url = env::var("REACHNOTE_OPENAI_BASE_URL")
+        .ok()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let has_model = env::var("REACHNOTE_OPENAI_MODEL")
+        .ok()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let ready = has_base_url && has_model;
+    let detail = if ready {
+        "已检测到 REACHNOTE_OPENAI_BASE_URL / REACHNOTE_OPENAI_MODEL".to_string()
+    } else {
+        "未配置 REACHNOTE_OPENAI_BASE_URL 和 REACHNOTE_OPENAI_MODEL".to_string()
+    };
+
+    AiProviderStatus {
+        id: ProviderId::OpenAiCompatible.as_str().to_string(),
+        label: ProviderId::OpenAiCompatible.label().to_string(),
+        ready,
+        detail,
+        is_recommended: false,
+    }
+}
+
+fn detect_agent_reach_status() -> AgentReachStatus {
+    let configured_command = agent_reach_command_name();
+    let Some(command) = resolve_agent_reach_command() else {
+        return AgentReachStatus {
+            installed: false,
+            version: None,
+            detail: format!("未找到 `{configured_command}`；平台能力矩阵将在安装后可检测"),
+        };
+    };
+    let version = agent_reach_version_for_command(&command);
+
+    AgentReachStatus {
+        installed: true,
+        version,
+        detail: format!("已检测到 {}", command.display()),
+    }
+}
+
+fn agent_reach_command_name() -> String {
+    env::var("REACHNOTE_AGENT_REACH_CMD")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "agent-reach".to_string())
+}
+
+fn resolve_agent_reach_command() -> Option<PathBuf> {
+    resolve_command(&agent_reach_command_name())
+}
+
+fn agent_reach_version_for_command(command: &Path) -> Option<String> {
+    Command::new(command)
+        .arg("version")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn resolve_command(command: &str) -> Option<PathBuf> {
+    let command_path = PathBuf::from(command);
+    if command_path.components().count() > 1 || command.contains(std::path::MAIN_SEPARATOR) {
+        return executable_path(&command_path);
+    }
+
+    env::var_os("PATH").and_then(|path| {
+        env::split_paths(&path).find_map(|dir| executable_path(&dir.join(command)))
+    })
+}
+
+fn executable_path(path: &Path) -> Option<PathBuf> {
+    path.is_file().then(|| path.to_path_buf())
 }
 
 fn fail_sync_task(
@@ -589,10 +1063,21 @@ fn duration_to_rfc3339(duration: Duration) -> Result<String, String> {
         .map_err(|error| format!("无法格式化 Notion date: {error}"))
 }
 
+fn truncate_for_message(value: &str) -> String {
+    let value = value.trim();
+    let mut truncated = value.chars().take(500).collect::<String>();
+    if value.chars().count() > 500 {
+        truncated.push('…');
+    }
+    truncated
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::Path;
+    use std::sync::Mutex;
 
     fn temp_store() -> (TaskStore, std::path::PathBuf) {
         let db_path = env::temp_dir().join(format!(
@@ -639,6 +1124,130 @@ mod tests {
             "model": "fake-retry-model"
         })
         .to_string()
+    }
+
+    static AGENT_REACH_ENV_LOCK: Mutex<()> = Mutex::new(());
+    const DOCTOR_SAMPLE: &str =
+        include_str!("../../crates/core/src/testdata/agent_reach_doctor.sample.json");
+
+    struct AgentReachEnvOverride {
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl AgentReachEnvOverride {
+        fn set(command: &Path) -> Self {
+            let previous = env::var_os("REACHNOTE_AGENT_REACH_CMD");
+            env::set_var("REACHNOTE_AGENT_REACH_CMD", command);
+            Self { previous }
+        }
+    }
+
+    impl Drop for AgentReachEnvOverride {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.take() {
+                env::set_var("REACHNOTE_AGENT_REACH_CMD", previous);
+            } else {
+                env::remove_var("REACHNOTE_AGENT_REACH_CMD");
+            }
+        }
+    }
+
+    #[test]
+    fn run_agent_reach_doctor_uses_fake_command_and_persists_snapshot() {
+        let _guard = AGENT_REACH_ENV_LOCK.lock().unwrap();
+        let (store, db_path) = temp_store();
+        let fake_command = write_fake_agent_reach("success", DOCTOR_SAMPLE);
+        let _env = AgentReachEnvOverride::set(&fake_command);
+
+        let platforms = run_agent_reach_doctor_blocking(&store).unwrap();
+
+        assert_eq!(platforms.len(), 15);
+        assert!(platforms.iter().any(|platform| platform.key == "github"));
+        let snapshot = store.get_latest_capability_snapshot().unwrap().unwrap();
+        assert_eq!(
+            snapshot.agent_reach_version.as_deref(),
+            Some("agent-reach vtest")
+        );
+        assert!(snapshot.doctor_json.contains("\"github\""));
+        assert!(!snapshot.normalized_json.contains("\"source_platforms\""));
+        assert!(snapshot.normalized_json.contains("\"github\""));
+
+        let _ = fs::remove_file(fake_command);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn run_agent_reach_doctor_reports_parse_error_for_bad_json() {
+        let _guard = AGENT_REACH_ENV_LOCK.lock().unwrap();
+        let (store, db_path) = temp_store();
+        let fake_command = write_fake_agent_reach("bad-json", "not json");
+        let _env = AgentReachEnvOverride::set(&fake_command);
+
+        let error = run_agent_reach_doctor_blocking(&store).unwrap_err();
+
+        assert!(error.contains("Agent-Reach doctor JSON 解析失败"));
+        assert!(store.get_latest_capability_snapshot().unwrap().is_none());
+
+        let _ = fs::remove_file(fake_command);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[cfg(unix)]
+    fn write_fake_agent_reach(name: &str, doctor_output: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let command_path = env::temp_dir().join(format!(
+            "reachnote-fake-agent-reach-{name}-{}",
+            create_task_id()
+        ));
+        let script = format!(
+            r#"#!/bin/sh
+if [ "$1" = "version" ]; then
+  printf '%s\n' 'agent-reach vtest'
+  exit 0
+fi
+if [ "$1" = "doctor" ] && [ "$2" = "--json" ]; then
+  cat <<'REACHNOTE_DOCTOR_JSON'
+{doctor_output}
+REACHNOTE_DOCTOR_JSON
+  exit 0
+fi
+printf '%s\n' "unexpected args: $*" >&2
+exit 2
+"#
+        );
+        fs::write(&command_path, script).unwrap();
+        let mut permissions = fs::metadata(&command_path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&command_path, permissions).unwrap();
+        command_path
+    }
+
+    #[cfg(windows)]
+    fn write_fake_agent_reach(name: &str, doctor_output: &str) -> std::path::PathBuf {
+        let suffix = create_task_id();
+        let output_path =
+            env::temp_dir().join(format!("reachnote-fake-agent-reach-{name}-{suffix}.json"));
+        fs::write(&output_path, doctor_output).unwrap();
+        let command_path =
+            env::temp_dir().join(format!("reachnote-fake-agent-reach-{name}-{suffix}.cmd"));
+        let script = format!(
+            r#"@echo off
+if "%1"=="version" (
+  echo agent-reach vtest
+  exit /b 0
+)
+if "%1"=="doctor" if "%2"=="--json" (
+  type "{}"
+  exit /b 0
+)
+echo unexpected args: %* 1>&2
+exit /b 2
+"#,
+            output_path.display()
+        );
+        fs::write(&command_path, script).unwrap();
+        command_path
     }
 
     #[test]

@@ -48,3 +48,23 @@ pnpm tauri dev
 ```
 
 用户可见 UI 还必须按项目规则做桌面 runtime 验证：真实打开 Tauri 窗口，检查队列默认页、四个导航 tab、采集页剪贴板按钮、空/disabled/error 状态、console error、文字溢出和布局重叠。
+
+## Next Phase PRD
+
+Last updated: 2026-07-01
+
+状态：Draft PRD ready for Claude review.
+
+新增下一阶段 PRD：
+
+- `plans/prds/20260701-1447-reachnote-next-phase-platform-template-destinations-onboarding-shortcuts.prd.md`
+
+PRD 范围：
+
+1. Agent-Reach 支持平台能力矩阵：以 `agent-reach doctor --json` 为 truth surface，覆盖 `github/twitter/youtube/reddit/facebook/instagram/bilibili/xiaohongshu/linkedin/xiaoyuzhou/v2ex/xueqiu/rss/exa_search/web`，但按 ready / needs_config / needs_login / off 分批接入，不承诺所有平台同等深度一次完成。
+2. 模板系统：先做系统模板和模板选择，模板驱动 prompt 与目标字段映射，不做复杂自定义编辑器。
+3. 多目的地同步：Notion 保留为首个 adapter；飞书、企业微信、钉钉第一版限定为 webhook/机器人消息，不承诺完整数据库/文档 API 集成。
+4. 首次启动引导：检测 Claude CLI、Codex CLI、OpenAI-compatible 配置和 Agent-Reach doctor，推荐默认 AI provider，引导选择并测试 destination。
+5. 全局快捷键：基于 Tauri global-shortcut，从剪贴板 URL 一键入队，依赖后台常驻/隐藏窗口能力。
+
+第一刀建议：`settings/onboarding/environment check`。理由是当前 provider 选择仍在 React session，模板和 destination 也没有持久化；不先建立 settings 地基，后续平台、模板、多目标和快捷键都会互相阻塞。

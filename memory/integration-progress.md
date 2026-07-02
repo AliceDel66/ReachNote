@@ -4,9 +4,9 @@ Last updated: 2026-07-01
 
 ## Current Snapshot
 
-状态：Done / Analysis-to-Notion auto-sync verified end to end
+状态：Done / Slice 3 template registry and selection integrated
 
-当前仓库已从 PRD-only 推进到可运行桌面壳，并完成本地队列、provider 失败路径、Agent-Reach web / GitHub repo 正文读取、结构化分析成功路径、Notion 最小同步、队列 in-progress 恢复、重试调度和 orphan analyzed 补同步：`Article URL -> create_capture_task(provider_id) -> SQLite tasks -> recover_interrupted_tasks -> sync_pending_analyzed_tasks -> run_capture_task -> Reading -> AgentReachWebReader(Jina Reader / GitHub API fallback) -> AnalysisRequest(content_text/content_reader) -> Analyzing -> provider adapter -> AnalysisResult JSON validation -> Syncing -> NotionClient -> Synced/Failed -> 队列页显示结果或失败原因`。`Analyzed` 只作为内部过渡/历史补偿状态，不再是用户可见链路会静默停住的终态。后台自动调度器、OS keychain、OAuth、完整桌面自动化 PASS 仍未接入。
+当前仓库已从 PRD-only 推进到可运行桌面壳，并完成本地队列、provider 失败路径、Agent-Reach web / GitHub repo 正文读取、结构化分析成功路径、Notion 最小同步、队列 in-progress 恢复、重试调度、orphan analyzed 补同步、Slice 1 首启动/settings 地基、Slice 2 平台能力矩阵和 Slice 3 模板注册/选择地基：`App startup -> get_app_settings + get_environment_status(轻量检测 + 最近平台快照) -> onboarding gate or Queue -> Settings/Onboarding run_agent_reach_doctor -> agent-reach doctor --json -> core normalize_doctor_output -> source_capability_snapshots -> Settings matrix / Capture source hint`。原采集链路升级为 `Article URL -> selected/default/recommended templateId -> create_capture_task(provider_id, template_id) -> SQLite tasks(template_id) -> recover_interrupted_tasks -> sync_pending_analyzed_tasks -> run_capture_task -> Reading -> AgentReachWebReader(Jina Reader / GitHub API fallback) -> AnalysisRequest(content_text/content_reader/template_id) -> template registry prompt profile -> Analyzing -> provider adapter -> AnalysisResult JSON validation -> Syncing -> NotionClient -> Synced/Failed -> 队列页显示结果/失败原因/template label`。`Analyzed` 只作为内部过渡/历史补偿状态，不再是用户可见链路会静默停住的终态。后台自动调度器、OS keychain、OAuth、真实按平台路由读取和登录态平台抓取仍未接入。
 
 最新 PRD：
 
@@ -25,6 +25,9 @@ Last updated: 2026-07-01
 - 桌面 UI 自动提交 smoke URL：通过 AX fallback；Computer Use 仍 Invalid app。采集页提交非敏感 `example.com` smoke URL 后，验证时该任务完成 `synced`，队列页显示 `已完成` 和 `Notion` 链接，Notion API 读取 page 返回 200 且字段匹配。
 - 队列 stale recovery：通过 AX fallback。手动向 app data SQLite 插入超过 300 秒未更新的 `reading` 测试任务，reload 真实 Tauri 窗口后，前端队列加载调用 `recover_interrupted_tasks`，SQLite 行变为 `failed/read_failed`，UI 显示失败原因和 `重试`；测试 row 已删除。
 - Orphan analyzed auto-sync：通过 AX fallback。用户截图中的 `OpenCLI` 任务原始 DB 状态为 `analyzed`、`notion_page_id` 为空；修复后 reload 真实 Tauri 窗口，前端调用 `sync_pending_analyzed_tasks`，DB 变为 `synced` 并写入 Notion page id `390c9b0c-3c3c-81b7-8332-e4a8b4413cb6`，队列 UI 显示 `已完成` 和 `Notion`。
+- Slice 1 setup/settings：通过本地命令、Tauri dev smoke 和 QA installed smoke。新 SQLite store 单测证明空库 `onboarding_completed=false`；现有 app data 迁移为 `onboarding_completed=1`，默认 provider/template/destination/shortcut 均写入；环境快照包含 Claude CLI、Codex CLI、agent-reach/version。Vite dev server 服务的新源码命中 onboarding/settings 文案与 settings commands。隔离 QA app `com.reachnote.qa` 已通过 Computer Use 验证首启动 onboarding、Settings 空 Notion、provider 跨重启持久化。
+- Slice 2 platform matrix：通过本地命令、Tauri dev 启动和 QA installed smoke。core fixture 单测覆盖真实 doctor JSON 15 平台；Tauri fake doctor 测试覆盖 `REACHNOTE_AGENT_REACH_CMD` 注入和 JSON 异常；QA app 首启动自动写入快照，Settings 手动刷新后快照 count 增加，矩阵显示 15 平台和 ready/needs_install/needs_login 三态；Capture 页 YouTube URL 只读提示显示需安装/暂不支持。QA 数据库最终 tasks=0、notion_settings=0，只保留 source capability snapshots。
+- Slice 3 template registry：通过本地命令和 QA installed smoke。core 测试证明模板 profile 注入 prompt、旧 `article` alias canonical 为 `web_article`；Tauri tests 证明注册模板 ID 可存 task、未知模板被拒、默认模板可存 settings；QA app 中模板页设默认 GitHub 后 DB `app_settings.default_template_id=github_project`，采集公开 GitHub URL 后 DB `tasks.template_id=github_project`，队列新增模板列并在重启后仍显示 `GitHub 项目分析`。该公开 GitHub URL 任务失败在 reader/network，不影响模板持久化验证。
 
 ## Progress Log
 
@@ -77,6 +80,11 @@ Last updated: 2026-07-01
 - Release CI 二次修复：第二次 tag run `28496402431` 已越过 Node setup，但在 `pnpm install --frozen-lockfile` 失败，具体错误为 `[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: @heroui/shared-utils@2.1.12`。根因是 `pnpm-workspace.yaml` 中 `@heroui/shared-utils` 的 `allowBuilds` 仍是占位值；已改为 `true`，并验证 `pnpm install --frozen-lockfile --force`、`pnpm build`、`git diff --check` 通过。下一步提交修复、再次移动 `v0.1.0` tag 触发 release workflow。
 - Release CI 三次修复：第三次 tag run `28496668063` 中 macOS universal build 已通过，Windows build 失败于 `src-tauri/src/lib.rs:490`，错误为 `no variant named Reopen found for enum RunEvent`。根因是 `tauri::RunEvent::Reopen` 只适合作为 macOS Dock reopen 路径，Windows target 下不可用；已将该匹配加 `#[cfg(target_os = "macos")]`，并在非 macOS 分支显式消费 closure 参数。为避免混入当前工作树其它未提交 tray 改动，修复 hunk 在 index 中单独 staged；临时 clean worktree 验证 `pnpm install --frozen-lockfile`、`pnpm build`、`cargo check --manifest-path src-tauri/Cargo.toml` 通过。下一步提交修复、再次移动 `v0.1.0` tag 触发 release workflow。
 - Release 发布完成：第四次 tag run `28497116955` 已成功，macOS universal 与 Windows jobs 均为 success。`v0.1.0` 已从 draft 发布为正式 release，URL 为 `https://github.com/AliceDel66/ReachNote/releases/tag/v0.1.0`，打包资产包括 `ReachNote_0.1.0_universal.dmg`、`ReachNote_universal.app.tar.gz`、`ReachNote_0.1.0_x64-setup.exe`、`ReachNote_0.1.0_x64_en-US.msi`。发布 tag 指向 `75b6bf0`。
+- Slice 1 集成：启动链路新增 settings/env gate，不破坏原 `Article -> Queue -> Analysis -> Notion` 主链路。既有安装继续直接进入 Queue，新安装由 `app_settings.onboarding_completed=false` 触发首启动引导；provider 选择会持久化并继续传给 `create_capture_task(providerId)`。
+- Slice 1 验证矩阵：`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml`、`git diff --check` 均通过。`pnpm tauri dev` 启动通过；用户可见 UI PASS 改走 `ReachNote QA.app`。
+- 桌面验证隔离修复：新增 `src-tauri/tauri.qa.conf.json` 和 `scripts/desktop-smoke-qa.sh`，用 `com.reachnote.qa` 隔离 app identity/data。`scripts/desktop-smoke-qa.sh --reset-data` 构建 debug app 后，Computer Use 绑定 `/Users/yaocheng/Desktop/nexus/rearchnote/target/debug/bundle/macos/ReachNote QA.app`，首启动、Settings、空队列和 provider persistence 已验证。正式 app data `com.reachnote.app` 未被 reset。
+- Slice 2 集成：`get_environment_status` 不再同步跑 doctor，只读最近平台快照；`run_agent_reach_doctor` 是唯一 doctor 执行入口。当前矩阵只是能力可见化和后续路由地基，未把 `run_capture_task` 改成按 platform action 路由，也未接 OpenCLI/登录态平台真实抓取。
+- Slice 3 集成：模板选择已经跨前端、Tauri command、SQLite task、core prompt 和队列展示形成闭环；本阶段仍保持 `source_type=article`，只让模板先驱动 prompt intent 和可见 label。后续 source_type/destination adapter 切片可在此基础上迁移，不需要重做模板选择 UI。
 
 #### Notion 测试前置闭环(2026-07-01)
 

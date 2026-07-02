@@ -6,7 +6,9 @@ use serde::Serialize;
 
 pub mod analysis;
 pub mod notion;
+pub mod platform;
 pub mod task;
+pub mod template;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ShellStatus {

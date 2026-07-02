@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::task::ErrorKind;
+use crate::template::{template_by_id, DEFAULT_TEMPLATE_ID};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -117,6 +118,9 @@ fn strip_code_fence(value: &str) -> &str {
 }
 
 pub fn build_analysis_prompt(request: &AnalysisRequest) -> String {
+    let template = template_by_id(&request.template_id)
+        .or_else(|| template_by_id(DEFAULT_TEMPLATE_ID))
+        .expect("default template must be registered");
     let note = request
         .note
         .as_deref()
@@ -160,6 +164,8 @@ pub fn build_analysis_prompt(request: &AnalysisRequest) -> String {
 - next_action 给用户下一步该做什么。
 - model 填你实际使用的模型或 provider 名称。
 - 不要编造正文没有支持的事实。
+- 模板名为「{template_name}」，必须按模板意图组织重点：{template_profile}
+- 本阶段所有模板都必须返回 shared schema {output_schema}，不要增加模板私有字段。
 
 输入：
 - url: {url}
@@ -175,7 +181,10 @@ pub fn build_analysis_prompt(request: &AnalysisRequest) -> String {
         url = request.url,
         source_type = request.source_type,
         source_domain = source_domain,
-        template_id = request.template_id,
+        template_id = template.id,
+        template_name = template.name,
+        template_profile = template.prompt_profile,
+        output_schema = template.output_schema,
         note = note,
         content_reader = content_reader,
         content_text = content_text,
@@ -295,6 +304,39 @@ mod tests {
 
         assert!(prompt.contains("未读取到网页正文"));
         assert!(prompt.contains("待复核初步判断"));
+    }
+
+    #[test]
+    fn prompt_includes_registered_template_profile() {
+        let prompt = build_analysis_prompt(&AnalysisRequest {
+            url: "https://github.com/AliceDel66/ReachNote".to_string(),
+            source_type: "article".to_string(),
+            source_domain: Some("github.com".to_string()),
+            template_id: "github_project".to_string(),
+            note: None,
+            content_text: Some("ReachNote repository README".to_string()),
+            content_reader: Some("Agent-Reach web / Jina Reader".to_string()),
+        });
+
+        assert!(prompt.contains("模板名为「GitHub 项目分析」"));
+        assert!(prompt.contains("技术栈"));
+        assert!(prompt.contains("research_card_v1"));
+    }
+
+    #[test]
+    fn prompt_accepts_legacy_article_template_alias() {
+        let prompt = build_analysis_prompt(&AnalysisRequest {
+            url: "https://example.com/article".to_string(),
+            source_type: "article".to_string(),
+            source_domain: Some("example.com".to_string()),
+            template_id: "article".to_string(),
+            note: None,
+            content_text: None,
+            content_reader: None,
+        });
+
+        assert!(prompt.contains("- template_id: web_article"));
+        assert!(prompt.contains("网页文章笔记"));
     }
 
     #[test]

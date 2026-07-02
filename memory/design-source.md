@@ -18,6 +18,7 @@ Last updated: 2026-07-01
 | 2026-06-30 | `assets/ui/ChatGPT Image 2026年6月30日 19_12_36 (4).png` | 设置 | AI 提供方、Agent-Reach、Notion 连接、隐私与存储；多项为计划中。 |
 | 2026-07-01 | `/var/folders/wm/p3j5nhns05n349bt1mvtpg340000gn/T/codex-clipboard-075d6138-3c60-42cb-b3ed-13c21d65b4ec.png` | 队列页顶部栏 / 右上 icon | 用户指出右上搜索、设置、缩小 icon 过粗、观感差；后续应使用更轻、更统一的 icon button。 |
 | 2026-07-01 | `/var/folders/wm/p3j5nhns05n349bt1mvtpg340000gn/T/codex-clipboard-97b1c528-aaf8-4610-8617-b57b2d41b03e.png` | 缩小目标行为 | 用户澄清“缩小”不是伪浮窗，而是进入 macOS 系统菜单栏语义：隐藏主窗口、后台静默运行，为后续快捷键一键收录做准备。 |
+| 2026-07-01 | `/var/folders/wm/p3j5nhns05n349bt1mvtpg340000gn/T/codex-clipboard-a928ae51-471a-4212-b247-32dfb1da3497.png` | macOS status item 缺失反馈 | 用户指出当前最小化后没有像 claude-mem 一样在 macOS 右上角状态栏出现图标，而是直接消失；目标入口是原生 status item，不是 Dock 图标或左侧 app menu。 |
 
 ## Product UI Decisions
 
@@ -27,7 +28,7 @@ Last updated: 2026-07-01
 - 状态栏：长期显示本地优先、Pre-alpha、当前 AI provider。
 - 模板：第一版只提供系统模板展示和默认选择，不做复杂模板编辑器。
 - 设置：第一版优先配置 Claude CLI、Agent-Reach doctor、Notion 连接状态；Codex CLI 和 OpenAI-compatible API 可以展示为计划中，除非 PRD 明确提升优先级。
-- 缩小行为：点击右上缩小按钮后隐藏主窗口并保持 Tauri 进程常驻后台；不要渲染 React 伪菜单栏小窗口。窗口重新打开走 macOS Dock Reopen / 后续原生菜单或快捷键入口。
+- 缩小行为：点击右上缩小按钮后隐藏主窗口并保持 Tauri 进程常驻后台；不要渲染 React 伪菜单栏小窗口。窗口重新打开优先走 macOS 原生 status item，Dock Reopen 和后续全局快捷键作为补充入口。
 
 ## Open Questions
 
@@ -47,3 +48,4 @@ Last updated: 2026-07-01
 
 - 登记用户对顶部右侧 icon 的视觉反馈：保留搜索、设置、隐藏功能，但按钮应更轻、更统一。
 - 登记用户对缩小态的澄清：目标是 macOS 系统菜单栏/后台常驻语义，不是应用内浮动导航条；这是后续全局快捷键一键收录的运行前提。
+- 登记用户对 status item 缺失的反馈：旧实现隐藏窗口后没有右上角菜单栏图标，造成“直接消失”的感知；后续缩小行为必须提供原生 status item 可恢复入口。

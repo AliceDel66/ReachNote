@@ -4,7 +4,9 @@ use std::sync::Mutex;
 use reachnote_core::analysis::ProviderId;
 use reachnote_core::notion::NotionSettings;
 use reachnote_core::task::{ErrorKind, Task, TaskStatus};
+use reachnote_core::template::{template_by_id, DEFAULT_TEMPLATE_ID};
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::Serialize;
 
 pub struct TaskStore {
     connection: Mutex<Connection>,
@@ -14,6 +16,28 @@ pub struct TaskStore {
 pub struct StoreError {
     pub kind: ErrorKind,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct AppSettings {
+    pub onboarding_completed: bool,
+    pub default_provider_id: Option<String>,
+    pub default_template_id: Option<String>,
+    pub default_destination_id: Option<String>,
+    pub global_shortcut: Option<String>,
+    pub global_shortcut_enabled: bool,
+    pub last_environment_check_json: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct CapabilitySnapshot {
+    pub id: i64,
+    pub agent_reach_version: Option<String>,
+    pub doctor_json: String,
+    pub normalized_json: String,
+    pub created_at: String,
 }
 
 impl StoreError {
@@ -230,6 +254,119 @@ impl TaskStore {
         Ok(())
     }
 
+    pub fn get_app_settings(&self) -> Result<AppSettings, StoreError> {
+        let connection = self.lock_connection()?;
+        connection
+            .query_row(
+                "SELECT
+                    onboarding_completed, default_provider_id, default_template_id,
+                    default_destination_id, global_shortcut, global_shortcut_enabled,
+                    last_environment_check_json, created_at, updated_at
+                FROM app_settings
+                WHERE id = 'singleton'",
+                [],
+                map_app_settings_row,
+            )
+            .optional()
+            .map_err(StoreError::database)?
+            .ok_or_else(|| StoreError::invalid_record("缺少 app_settings singleton"))
+    }
+
+    pub fn save_app_settings(&self, settings: &AppSettings) -> Result<(), StoreError> {
+        validate_app_settings_for_storage(settings)?;
+        let connection = self.lock_connection()?;
+        connection.execute(
+            "INSERT INTO app_settings (
+                id, onboarding_completed, default_provider_id, default_template_id,
+                default_destination_id, global_shortcut, global_shortcut_enabled,
+                last_environment_check_json, created_at, updated_at
+            ) VALUES ('singleton', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ON CONFLICT(id) DO UPDATE SET
+                onboarding_completed = excluded.onboarding_completed,
+                default_provider_id = excluded.default_provider_id,
+                default_template_id = excluded.default_template_id,
+                default_destination_id = excluded.default_destination_id,
+                global_shortcut = excluded.global_shortcut,
+                global_shortcut_enabled = excluded.global_shortcut_enabled,
+                last_environment_check_json = excluded.last_environment_check_json,
+                updated_at = excluded.updated_at",
+            params![
+                bool_to_int(settings.onboarding_completed),
+                &settings.default_provider_id,
+                &settings.default_template_id,
+                &settings.default_destination_id,
+                &settings.global_shortcut,
+                bool_to_int(settings.global_shortcut_enabled),
+                &settings.last_environment_check_json,
+                &settings.created_at,
+                &settings.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn save_environment_snapshot(
+        &self,
+        environment_json: &str,
+        updated_at: &str,
+    ) -> Result<(), StoreError> {
+        let mut settings = self.get_app_settings()?;
+        settings.last_environment_check_json = Some(environment_json.to_string());
+        settings.updated_at = updated_at.to_string();
+        self.save_app_settings(&settings)
+    }
+
+    pub fn save_capability_snapshot(
+        &self,
+        agent_reach_version: Option<&str>,
+        doctor_json: &str,
+        normalized_json: &str,
+        created_at: &str,
+    ) -> Result<(), StoreError> {
+        if doctor_json.trim().is_empty() || normalized_json.trim().is_empty() {
+            return Err(StoreError::invalid_record(
+                "平台能力快照 doctor_json / normalized_json 不能为空",
+            ));
+        }
+
+        let connection = self.lock_connection()?;
+        connection.execute(
+            "INSERT INTO source_capability_snapshots (
+                agent_reach_version, doctor_json, normalized_json, created_at
+            ) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                agent_reach_version,
+                doctor_json,
+                normalized_json,
+                created_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_latest_capability_snapshot(&self) -> Result<Option<CapabilitySnapshot>, StoreError> {
+        let connection = self.lock_connection()?;
+        connection
+            .query_row(
+                "SELECT id, agent_reach_version, doctor_json, normalized_json, created_at
+                FROM source_capability_snapshots
+                ORDER BY id DESC
+                LIMIT 1",
+                [],
+                |row| {
+                    Ok(CapabilitySnapshot {
+                        id: row.get(0)?,
+                        agent_reach_version: row.get(1)?,
+                        doctor_json: row.get(2)?,
+                        normalized_json: row.get(3)?,
+                        created_at: row.get(4)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(StoreError::database)
+    }
+
     pub fn recover_stale_processing_tasks(
         &self,
         now: &str,
@@ -279,6 +416,9 @@ impl TaskStore {
         }
 
         connection.execute_batch(NOTION_SETTINGS_SCHEMA)?;
+        connection.execute_batch(APP_SETTINGS_SCHEMA)?;
+        connection.execute_batch(SOURCE_CAPABILITY_SNAPSHOTS_SCHEMA)?;
+        ensure_app_settings_row(&connection)?;
 
         Ok(())
     }
@@ -341,6 +481,20 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> Result<Task, rusqlite::Error> {
         created_at: row.get(15)?,
         updated_at: row.get(16)?,
         synced_at: row.get(17)?,
+    })
+}
+
+fn map_app_settings_row(row: &rusqlite::Row<'_>) -> Result<AppSettings, rusqlite::Error> {
+    Ok(AppSettings {
+        onboarding_completed: int_to_bool(row.get(0)?),
+        default_provider_id: row.get(1)?,
+        default_template_id: row.get(2)?,
+        default_destination_id: row.get(3)?,
+        global_shortcut: row.get(4)?,
+        global_shortcut_enabled: int_to_bool(row.get(5)?),
+        last_environment_check_json: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }
 
@@ -434,6 +588,33 @@ CREATE TABLE IF NOT EXISTS notion_settings (
 );
 ";
 
+const APP_SETTINGS_SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS app_settings (
+    id TEXT PRIMARY KEY CHECK (id = 'singleton'),
+    onboarding_completed INTEGER NOT NULL CHECK (onboarding_completed IN (0, 1)),
+    default_provider_id TEXT CHECK (
+        default_provider_id IS NULL OR default_provider_id IN ('claude_cli', 'codex_cli', 'openai_compatible')
+    ),
+    default_template_id TEXT,
+    default_destination_id TEXT,
+    global_shortcut TEXT,
+    global_shortcut_enabled INTEGER NOT NULL CHECK (global_shortcut_enabled IN (0, 1)),
+    last_environment_check_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+";
+
+const SOURCE_CAPABILITY_SNAPSHOTS_SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS source_capability_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_reach_version TEXT,
+    doctor_json TEXT NOT NULL,
+    normalized_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+";
+
 fn schema_needs_rebuild(schema: &str) -> bool {
     !schema.contains("'analyzed'")
         || !schema.contains("provider_id")
@@ -449,9 +630,9 @@ fn validate_task_for_storage(task: &Task) -> Result<(), StoreError> {
         )));
     }
 
-    if task.template_id != "article" {
+    if template_by_id(&task.template_id).is_none() {
         return Err(StoreError::invalid_record(format!(
-            "当前阶段只允许 article template_id: {}",
+            "未知 template_id: {}",
             task.template_id
         )));
     }
@@ -462,6 +643,84 @@ fn validate_task_for_storage(task: &Task) -> Result<(), StoreError> {
             task.provider_id
         )));
     }
+
+    Ok(())
+}
+
+fn validate_app_settings_for_storage(settings: &AppSettings) -> Result<(), StoreError> {
+    if let Some(provider_id) = settings.default_provider_id.as_deref() {
+        if ProviderId::from_str(provider_id).is_none() {
+            return Err(StoreError::invalid_record(format!(
+                "未知默认 AI provider: {provider_id}"
+            )));
+        }
+    }
+
+    if let Some(template_id) = settings.default_template_id.as_deref() {
+        if template_id.trim().is_empty() {
+            return Err(StoreError::invalid_record("默认模板不能为空字符串"));
+        }
+        if template_by_id(template_id).is_none() {
+            return Err(StoreError::invalid_record(format!(
+                "未知默认模板: {template_id}"
+            )));
+        }
+    }
+
+    if settings
+        .global_shortcut
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(str::is_empty)
+    {
+        return Err(StoreError::invalid_record("全局快捷键不能为空字符串"));
+    }
+
+    if settings.created_at.trim().is_empty() || settings.updated_at.trim().is_empty() {
+        return Err(StoreError::invalid_record(
+            "app_settings created_at / updated_at 不能为空",
+        ));
+    }
+
+    Ok(())
+}
+
+fn ensure_app_settings_row(connection: &Connection) -> Result<(), StoreError> {
+    let has_settings: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM app_settings WHERE id = 'singleton')",
+        [],
+        |row| row.get::<_, i64>(0).map(|value| value != 0),
+    )?;
+    if has_settings {
+        return Ok(());
+    }
+
+    let task_count =
+        connection.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))?;
+    let notion_count = connection.query_row("SELECT COUNT(*) FROM notion_settings", [], |row| {
+        row.get::<_, i64>(0)
+    })?;
+    let existing_install = task_count > 0 || notion_count > 0;
+    let timestamp = "0";
+    let default_destination_id = if notion_count > 0 {
+        Some("notion")
+    } else {
+        None
+    };
+    connection.execute(
+        "INSERT INTO app_settings (
+            id, onboarding_completed, default_provider_id, default_template_id,
+            default_destination_id, global_shortcut, global_shortcut_enabled,
+            last_environment_check_json, created_at, updated_at
+        ) VALUES ('singleton', ?1, 'claude_cli', ?2, ?3, 'CommandOrControl+Shift+R', 0, NULL, ?4, ?5)",
+        params![
+            bool_to_int(existing_install),
+            DEFAULT_TEMPLATE_ID,
+            default_destination_id,
+            timestamp,
+            timestamp,
+        ],
+    )?;
 
     Ok(())
 }
@@ -514,6 +773,18 @@ fn task_needs_auto_sync(task: &Task) -> bool {
     task.status == TaskStatus::Analyzed
         && task.analysis_json.is_some()
         && task.notion_page_id.is_none()
+}
+
+fn bool_to_int(value: bool) -> i64 {
+    if value {
+        1
+    } else {
+        0
+    }
+}
+
+fn int_to_bool(value: i64) -> bool {
+    value != 0
 }
 
 #[cfg(test)]
@@ -599,6 +870,28 @@ mod tests {
         let mut task = sample_task("task-1");
         task.source_type = "video".to_string();
         let error = store.insert_task(&task).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::ParseFailed);
+    }
+
+    #[test]
+    fn accepts_registered_template_ids() {
+        let store = memory_store();
+        let mut task = sample_task("task-1");
+        task.template_id = "github_project".to_string();
+        store.insert_task(&task).unwrap();
+
+        let loaded = store.get_task("task-1").unwrap().unwrap();
+        assert_eq!(loaded.template_id, "github_project");
+    }
+
+    #[test]
+    fn rejects_unknown_template_id() {
+        let store = memory_store();
+        let mut task = sample_task("task-1");
+        task.template_id = "unknown_template".to_string();
+
+        let error = store.insert_task(&task).unwrap_err();
+
         assert_eq!(error.kind, ErrorKind::ParseFailed);
     }
 
@@ -751,6 +1044,7 @@ mod tests {
         assert_eq!(loaded.provider_id, "claude_cli");
         assert_eq!(loaded.note, None);
         assert_eq!(loaded.analysis_json, None);
+        assert!(store.get_app_settings().unwrap().onboarding_completed);
 
         let settings = NotionSettings {
             token: "ntn_fake_token".to_string(),
@@ -789,6 +1083,107 @@ mod tests {
         };
 
         let error = store.save_notion_settings(&settings, "100").unwrap_err();
+        assert_eq!(error.kind, ErrorKind::ParseFailed);
+    }
+
+    #[test]
+    fn new_store_starts_with_onboarding_required() {
+        let store = memory_store();
+
+        let settings = store.get_app_settings().unwrap();
+
+        assert!(!settings.onboarding_completed);
+        assert_eq!(settings.default_provider_id.as_deref(), Some("claude_cli"));
+        assert_eq!(
+            settings.default_template_id.as_deref(),
+            Some(DEFAULT_TEMPLATE_ID)
+        );
+        assert_eq!(settings.default_destination_id, None);
+        assert_eq!(
+            settings.global_shortcut.as_deref(),
+            Some("CommandOrControl+Shift+R")
+        );
+        assert!(!settings.global_shortcut_enabled);
+    }
+
+    #[test]
+    fn app_settings_round_trip_and_environment_snapshot() {
+        let store = memory_store();
+        let mut settings = store.get_app_settings().unwrap();
+        settings.onboarding_completed = true;
+        settings.default_provider_id = Some("codex_cli".to_string());
+        settings.default_template_id = Some("github_project".to_string());
+        settings.default_destination_id = Some("notion".to_string());
+        settings.updated_at = "200".to_string();
+        store.save_app_settings(&settings).unwrap();
+
+        store
+            .save_environment_snapshot("{\"ok\":true}", "300")
+            .unwrap();
+        let loaded = store.get_app_settings().unwrap();
+
+        assert!(loaded.onboarding_completed);
+        assert_eq!(loaded.default_provider_id.as_deref(), Some("codex_cli"));
+        assert_eq!(
+            loaded.default_template_id.as_deref(),
+            Some("github_project")
+        );
+        assert_eq!(loaded.default_destination_id.as_deref(), Some("notion"));
+        assert_eq!(
+            loaded.last_environment_check_json.as_deref(),
+            Some("{\"ok\":true}")
+        );
+        assert_eq!(loaded.updated_at, "300");
+    }
+
+    #[test]
+    fn capability_snapshot_round_trip_reads_latest() {
+        let store = memory_store();
+        assert_eq!(store.get_latest_capability_snapshot().unwrap(), None);
+
+        store
+            .save_capability_snapshot(
+                Some("agent-reach v1.5.0"),
+                r#"{"github":{"status":"ok"}}"#,
+                r#"[{"key":"github"}]"#,
+                "100",
+            )
+            .unwrap();
+        store
+            .save_capability_snapshot(
+                None,
+                r#"{"web":{"status":"ok"}}"#,
+                r#"[{"key":"web"}]"#,
+                "200",
+            )
+            .unwrap();
+
+        let snapshot = store.get_latest_capability_snapshot().unwrap().unwrap();
+        assert_eq!(snapshot.agent_reach_version, None);
+        assert_eq!(snapshot.doctor_json, r#"{"web":{"status":"ok"}}"#);
+        assert_eq!(snapshot.normalized_json, r#"[{"key":"web"}]"#);
+        assert_eq!(snapshot.created_at, "200");
+    }
+
+    #[test]
+    fn rejects_unknown_default_provider() {
+        let store = memory_store();
+        let mut settings = store.get_app_settings().unwrap();
+        settings.default_provider_id = Some("unknown".to_string());
+
+        let error = store.save_app_settings(&settings).unwrap_err();
+
+        assert_eq!(error.kind, ErrorKind::ParseFailed);
+    }
+
+    #[test]
+    fn rejects_unknown_default_template() {
+        let store = memory_store();
+        let mut settings = store.get_app_settings().unwrap();
+        settings.default_template_id = Some("unknown_template".to_string());
+
+        let error = store.save_app_settings(&settings).unwrap_err();
+
         assert_eq!(error.kind, ErrorKind::ParseFailed);
     }
 }

@@ -4,7 +4,7 @@ Last updated: 2026-07-01
 
 ## Current Snapshot
 
-状态：Done / Analyzed-to-Notion auto-sync hardened
+状态：Done / Slice 3 template registry and selection foundation integrated
 
 用户要求清空旧实现后，当前已恢复 Tauri 2 + React 18 + HeroUI + Rust core 最小桌面壳，并推进到本地 SQLite 队列与最小 worker 地基。
 
@@ -22,8 +22,19 @@ Last updated: 2026-07-01
 - Tauri dev 桌面 UI smoke 已通过 AX fallback：采集页提交非敏感 `example.com` smoke URL，fake reader + fake Claude 生成结构化卡，`sync_capture_task` 写入真实 Notion page；验证时该 smoke 任务为 `synced`，Notion API `GET /v1/pages/{id}` 返回 200 且 Title/URL/Status/Score/Source Type/Tags/AI Model 均匹配。
 - 队列 in-progress 恢复已接入：前端加载/轮询队列前会调用 `recover_interrupted_tasks`，默认恢复超过 300 秒未更新的 `reading/analyzing/syncing` 为 `failed/read_failed`；失败行的 `重试` 统一调用 `retry_capture_task`，后端根据 `analysis_json` 决定重跑分析或只重试 Notion 同步。
 - `Analyzed` 不再是会静默停住的终态：`run_capture_task` 后端命令分析成功后会继续 `sync_capture_task_blocking`；队列加载/刷新也会调用 `sync_pending_analyzed_tasks`，补同步历史遗留的 `Analyzed + analysis_json + no notion_page_id` 任务。
-- 顶部右侧 icon 已按用户反馈收敛为更轻的 `Search` / `Settings2` / `Minimize2`；缩小目标已澄清为 macOS 系统菜单栏语义：隐藏主窗口、后台静默运行、后续用 Dock Reopen/快捷键唤回，不再渲染伪 compact bar 小窗口。
-- Computer Use 仍是 Blocked：对 `ReachNote`、`reachnote-app` 和 debug binary 完整路径均返回 `Invalid app`。既有队列/同步桌面验证可记为 Tauri dev + macOS Accessibility fallback PASS；最新缩小隐藏点击因 `osascript` 辅助访问被拒只能记为 Blocked，不能记为 Computer Use PASS。
+- 顶部右侧 icon 已按用户反馈收敛为更轻的 `Search` / `Settings2` / `Minimize2`；缩小目标已澄清为 macOS 系统菜单栏语义：隐藏主窗口、后台静默运行、后续用原生 status item / Dock Reopen / 快捷键唤回，不再渲染伪 compact bar 小窗口。
+- 原生 macOS status item 已接入 Tauri 启动层：`tray-icon` feature 打开，启动时创建 ReachNote 菜单栏图标，左键恢复主窗口，右键菜单提供显示、隐藏、退出。用户此前最小化后“直接消失”的原因是旧实现只有 `window.hide()`，没有创建系统菜单栏入口。
+- 下一阶段 PRD 已新增：`plans/prds/20260701-1447-reachnote-next-phase-platform-template-destinations-onboarding-shortcuts.prd.md`。该 PRD 将后续范围定为 Agent-Reach 平台能力矩阵、模板注册、多目的地同步、首次启动引导和全局快捷键；第一刀建议先做 settings/onboarding/环境检测地基。
+- Slice 1 已实现 settings/onboarding/环境检测地基：新增 SQLite `app_settings` singleton、`get_app_settings` / `save_app_settings` / `get_environment_status` Tauri commands、首次启动 onboarding gating、默认 provider/template/destination/shortcut 持久化占位，并将 `App.tsx` 拆分到 `src/onboarding/`、`src/settings/`、`src/capture/`、`src/queue/`、`src/templates/`、`src/components/` 与 shared `types/constants/utils`。
+- 当前 app data 已迁移出 `app_settings`：现有安装 `onboarding_completed=1`，默认 provider `claude_cli`，旧默认 template `article` 作为 alias 兼容并在新保存时 canonical 为 `web_article`，默认 destination `notion`，快捷键占位 `CommandOrControl+Shift+R`，环境快照包含 Claude CLI、Codex CLI、agent-reach 检测结果。
+- Desktop Slice 1 smoke 已修复为隔离 QA 安装版路径：新增 `src-tauri/tauri.qa.conf.json` 和 `scripts/desktop-smoke-qa.sh`，构建 `target/debug/bundle/macos/ReachNote QA.app`，bundle id `com.reachnote.qa`，数据目录 `~/Library/Application Support/com.reachnote.qa`。Computer Use 可直接绑定该 `.app` 并验证首启动 onboarding、Settings、空队列和 provider 跨重启持久化；正式 `com.reachnote.app` 数据未被清理。
+- Slice 2 已接入 Agent-Reach 平台能力矩阵：新增 core `platform` 归一化模块，读取真实 `agent_reach_doctor.sample.json` fixture，输出 `SourcePlatformStatus` 15 平台状态；新增 SQLite `source_capability_snapshots` 表，`run_agent_reach_doctor` 手动运行 `agent-reach doctor --json` 并保存 raw/normalized 快照，`get_environment_status` 只读取最近快照，不在启动/进设置时同步跑 doctor。
+- Settings 已新增「Agent-Reach 平台能力」矩阵，支持刷新、loading、empty、error、快照时间、15 平台行、availability/action/backend/message 显示；Capture 页新增只读来源提示（例如 YouTube 显示需安装/暂不支持），不改变采集提交和真实读取路由。
+- Slice 2 QA installed smoke：`ReachNote QA.app` 首启动自动平台检测写入快照；Settings 手动刷新后快照 count 增加，矩阵显示 15 平台。验证时本机真实 doctor 状态为 GitHub/B站/RSS/Web ready，Twitter/YouTube/Reddit 等需安装，雪球需登录，V2EX/Exa 当前受本机网络/配置影响不是 ready。QA 数据库最终 tasks=0、notion_settings=0。
+- Slice 3 已接入模板注册/选择地基：新增 core `template` 静态注册表，canonical IDs 为 `web_article`、`github_project`、`video_note`、`rss_digest`、`platform_discussion`，旧 `article` alias 兼容；新增 `list_templates` command，`create_capture_task` 接收可选 `templateId` 并在缺省时按 URL 推荐模板，`save_app_settings` 保存默认模板时 canonical 化。
+- Slice 3 prompt：`build_analysis_prompt` 根据注册模板注入模板名、prompt profile 和 shared `research_card_v1` 约束，不改变 `AnalysisResult` schema；core 单测覆盖 GitHub 模板 profile 和旧 `article` alias。
+- Slice 3 UI：模板页可设默认模板，采集页新增模板下拉与推荐模板提示，队列新增「模板」列并从 `task.template_id` 显示中文 label；搜索也可命中模板 label。
+- Slice 3 QA installed smoke：`ReachNote QA.app` 中模板页默认从 `web_article` 切到 `github_project` 后，SQLite `app_settings.default_template_id=github_project`；采集 GitHub URL 时下拉和推荐均显示 GitHub 项目分析，队列新增模板列，重启 QA app 后队列仍显示 `GitHub 项目分析`。该 QA task 失败在 GitHub reader 网络请求，非模板持久化链路问题。
 
 ## Rules
 
@@ -85,3 +96,9 @@ Last updated: 2026-07-01
 - 验证：`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo test --manifest-path src-tauri/Cargo.toml` 32 passed / 1 ignored、`cargo check --manifest-path src-tauri/Cargo.toml` 通过；Tauri dev + AX fallback reload 后，截图中的 `task-1782878357-900342000-78578-1` 已从 `analyzed` 变为 `synced`，Notion page id `390c9b0c-3c3c-81b7-8332-e4a8b4413cb6`，队列 UI 显示 `已完成` 和 `Notion`。
 - Release CI 修复：`main` 和 `v0.1.0` 已通过本机 GitHub SSH key + `127.0.0.1:7890` HTTP CONNECT 代理推到 `AliceDel66/ReachNote`；首次 release run `28496282107` 失败于 `Setup Node`，原因是 Node 20 不满足 `pnpm@11.5.0` 的 Node >= 22.13 / `node:sqlite` 要求。已将 `.github/workflows/release.yml` 改为 Node 24，并通过 `git diff --check`、`pnpm build` 验证；下一步提交修复并移动 `v0.1.0` tag 重新触发 draft release。
 - Release CI 二次修复：第二次 release run `28496402431` 失败于 `pnpm install --frozen-lockfile`，错误为 `[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: @heroui/shared-utils@2.1.12`。已将 `pnpm-workspace.yaml` 中 `@heroui/shared-utils` 的 `allowBuilds` 占位值改为 `true`，并通过 `pnpm install --frozen-lockfile --force`、`pnpm build`、`git diff --check` 验证；下一步提交修复并再次移动 `v0.1.0` tag 触发 draft release。
+- 下一阶段 PRD：新增 `plans/prds/20260701-1447-reachnote-next-phase-platform-template-destinations-onboarding-shortcuts.prd.md`，供 Claude 只读审核。文档以当前已验证 `Article -> Notion` 链路为基线，把用户提出的五个方向拆成可合并切片：首次启动引导/settings 持久化、Agent-Reach 15 平台能力矩阵、模板注册、多目的地 sync adapter、webhook 目标、全局快捷键和第一批平台扩展。验证：文件存在、占位词扫描、`git diff --check`。
+- Slice 1 实现：新增 `app_settings` 持久化与环境检测命令；新安装进入 onboarding，既有安装按 tasks/notion settings 自动迁移为已完成 onboarding；provider 选择可从 onboarding/settings/capture 持久化；Notion 保存成功后标记默认 destination 为 `notion`。
+- Slice 1 前端拆分：`App.tsx` 收敛为 setup、queue polling、capture submit、provider persistence 和 onboarding gating 编排；页面组件拆到 `src/onboarding/`、`src/settings/`、`src/capture/`、`src/queue/`、`src/templates/`，壳层拆到 `src/components/`，共享契约拆到 `src/types.ts` / `src/constants.ts` / `src/utils.ts`。
+- Slice 1 验证：`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml`、`git diff --check` 均通过。`pnpm tauri dev` 启动通过；SQLite 确认现有安装迁移和环境快照。Claude review gate 约 3 分钟无输出后终止，记录为 Blocked。
+- 桌面验证隔离修复：新增 QA bundle 配置和 smoke 脚本，命令 `scripts/desktop-smoke-qa.sh --reset-data` 先构建隔离 `ReachNote QA.app`。Computer Use 真实读取到 `bundleID com.reachnote.qa` 和窗口 `ReachNote QA`，新安装首屏显示 `首次启动检查`；进入 Settings 后 Notion 配置为空，`notion_settings` count 为 0；切换 Codex 后重启 QA app，Queue 底部显示 `AI Codex CLI`，证明 provider 持久化恢复。为避免 password manager / WebView 自动填充污染 smoke，Notion token/database 输入已加 `autoComplete` 与 password-manager ignore attributes。
+- Slice 2 平台矩阵实现：core fixture 单测覆盖 15 key、ready/warn/off、twitter 未安装、xueqiu 需登录、youtube off 和畸形 JSON；Tauri fake doctor 测试覆盖 `REACHNOTE_AGENT_REACH_CMD` 注入、快照写入和 parse error。Settings 矩阵与 Capture 只读提示已在 QA app 中验证；本阶段仍不做真实按平台路由读取、不接登录态平台抓取、不触发安装/configure。
