@@ -1,9 +1,9 @@
 # ReachNote Next Phase PRD: Platform Matrix, Templates, Multi-Destination Sync, Onboarding, Shortcuts
 
-> **Status**: Draft  
-> **Date**: 2026-07-01  
-> **Owner**: Yaocheng review; implementation owner assigned after PRD approval  
-> **Audience**: Claude review, Codex implementation, product/engineering planning  
+> **Status**: Draft
+> **Date**: 2026-07-01
+> **Owner**: Yaocheng review; implementation owner assigned after PRD approval
+> **Audience**: Claude review, Codex implementation, product/engineering planning
 > **Source Inputs**: `memory/README.md`, `memory/frontend-progress.md`, `memory/backend-progress.md`, `memory/integration-progress.md`, `memory/design-source.md`, `memory/desktop-qa.md`, `plans/prds/20260630-1906-reachnote-mvp-reset.prd.md`, current code under `src/`, `src-tauri/`, `crates/core/`, local `agent-reach doctor --json`, local `agent-reach --help`, user-provided Agent-Reach platform screenshot.
 
 ## AI Quick-Read Card
