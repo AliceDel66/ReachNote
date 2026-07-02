@@ -1,12 +1,12 @@
 # Review Gate
 
-Last updated: 2026-07-01
+Last updated: 2026-07-02
 
 ## Current Snapshot
 
-状态：Blocked / Slice 3 template registry Claude review timed out
+状态：In Progress / C0 CI gate codex review passed, GitHub Actions verification pending
 
-历史上多个队列/worker/provider/reader/Notion 切片的 Claude CLI 只读 review gate 曾 timeout 或 blocked。`Analyzed -> Notion` 自动同步 bugfix 已完成 Claude gate：无 P0/P1，1 个 P2（批量补同步遇到极低概率 DB 错误会提前退出，后续 refresh 可恢复），Gate = PASS。Slice 1 settings/onboarding/App.tsx 拆分本地验证通过，但 Claude CLI 只读 review 运行约 3 分钟无有效输出，终止时仅返回 `Execution error`，因此该切片 gate = Blocked。桌面 QA 隔离修复已完成 Claude gate：最终 Gate = PASS。Slice 2 Agent-Reach 平台能力矩阵已完成 Claude gate：无 P0/P1，Gate = PASS。最新 Slice 3 模板注册/模板选择地基本地验证与桌面 QA 均通过，但 Claude CLI 只读 review 两次超时无输出，当前 gate = Blocked，不能声明 Claude PASS。
+历史上多个队列/worker/provider/reader/Notion 切片的 Claude CLI 只读 review gate 曾 timeout 或 blocked。`Analyzed -> Notion` 自动同步 bugfix 已完成 Claude gate：无 P0/P1，1 个 P2（批量补同步遇到极低概率 DB 错误会提前退出，后续 refresh 可恢复），Gate = PASS。桌面 QA 隔离修复已完成 Claude gate：最终 Gate = PASS。Slice 2 Agent-Reach 平台能力矩阵已完成 Claude gate：无 P0/P1，Gate = PASS。Slice 3 模板注册/模板选择地基本地验证与桌面 QA 均通过，但 Claude CLI 只读 review 两次超时无输出，最终由 2026-07-02 的 Slice 1-3 单 commit 落盘。C0 CI 验收防线已按报告进入 PR：codex 只读 review fallback 对 C0 workflow diff 返回 Gate = PASS；GitHub Actions 真实 runner 与 PR body 修正仍待网络/API 稳定后确认。
 
 ## Gate Rules
 
@@ -46,3 +46,12 @@ Last updated: 2026-07-01
 - Review attempt 15：针对 Slice 2 Agent-Reach 平台能力矩阵，packet 包含目标、验证矩阵、`platform.rs`、store 快照、Tauri doctor command、frontend Settings/Capture 摘录；命令为 `claude -p --output-format text --disable-slash-commands --safe-mode --model sonnet --tools "" --no-session-persistence "$REVIEW_PROMPT"`。Claude 返回 Gate = PASS，无 P0/P1。P2：保留但暂不产出的 enum/action 变体、`NotSupportedYet` 语义偏保守、`get_environment_status` 写环境快照失败会放大到启动错误、`last_environment_check_json` 与 snapshot 双存可能未来漂移、summary 双遍历。Claude 还提到 async command blocking、Capture helper 未完整审阅、URL key mapping 未完整审阅；其中 blocking 是误判（command 入口已 `spawn_blocking`），后两项来自 packet 摘录截断，源码已覆盖。P2 不阻塞本切片。
 - Review attempt 16：针对 Slice 3 模板注册/模板选择地基，packet 包含范围、验收标准、core/Tauri/frontend 行为摘要、验证矩阵和 Computer Use QA 结果；命令为 `/opt/homebrew/bin/timeout 240 claude -p --output-format text --disable-slash-commands --safe-mode --model sonnet --tools "" --no-session-persistence "$REVIEW_PROMPT"`。结果：退出码 124，超时无输出，不能作为 PASS。
 - Review attempt 17：同一 Slice 3 使用更小 packet 重试，仅保留目标、关键改动和验证矩阵；命令为 `/opt/homebrew/bin/timeout 180 claude -p --output-format text --disable-slash-commands --safe-mode --model sonnet --tools "" --no-session-persistence "$REVIEW_PROMPT"`。结果：退出码 124，超时无输出。当前 gate：Blocked。已通过 `pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml`、`git diff --check`、`scripts/desktop-smoke-qa.sh --reset-data` 和 Computer Use QA；但没有可采信的 Claude review PASS。
+
+### 2026-07-02
+
+- Slice 1-3 已由 Yaocheng 落盘为 `b307839 落盘 Slice 1-3：settings、平台矩阵与模板地基`；本地 `git status` 进入干净状态后，Codex 从该提交创建 `codex/c0-ci-landing` 分支。
+- C0 CI 验收防线实现提交：`0a81607 新增 C0 CI 验收防线`。改动范围仅 `.github/workflows/ci.yml`，新增 macOS `pull_request` / `push main` 验证 job，包含 `pnpm/action-setup@v4`、Node 24、Rust stable/cache、`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml` 和 PR/push 分支化 whitespace check；workflow 权限为 `contents: read`，未使用 `pull_request_target`。
+- 本地 C0 验证：`pnpm typecheck && pnpm build` 通过；`cargo test -p reachnote-core` 26 passed；`cargo test --manifest-path src-tauri/Cargo.toml` 41 passed / 1 ignored；`cargo check --manifest-path src-tauri/Cargo.toml` 通过；`git diff --check` 通过。
+- PR 已创建：`https://github.com/AliceDel66/ReachNote/pull/1`，head 为 `codex/c0-ci-landing`，base 为 `main`。由于远端 `main` 在创建 PR 时仍停在 `919f5f4`，该 PR 包含前置 `b307839` 和 C0 `0a81607` 两个提交；C0 自身提交不改应用代码。
+- Review attempt 18：按 C0 报告要求执行 codex 只读 review fallback，命令为 `codex exec -s read-only "<C0 workflow diff review prompt>"`，审查范围限定到 `0a81607` 的 `.github/workflows/ci.yml`。结果：Findings 无 P0/P1/P2，Gate = PASS。残余风险：真实 GitHub Actions runner 上仍需确认 `pull_request` 场景下 `origin/${{ github.base_ref }}...HEAD` 可稳定运行；`fetch-depth: 0` 已作为正确前置配置。
+- PR 元数据风险：首次 `gh pr create` body 中 Markdown 反引号被 zsh 命令替换污染，PR 页面正文当前包含本地命令输出。随后两次 `gh pr edit` 和一次 REST `gh api ... PATCH` 均因 GitHub API TLS handshake timeout/EOF 失败，尚未完成 body 修正；代码分支和 PR 本身已存在，后续需在 GitHub API 或浏览器登录态稳定后清理 PR body。
