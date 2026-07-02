@@ -12,7 +12,7 @@ use reachnote_core::notion::{NotionSettings, NotionSettingsView, NOTION_API_VERS
 use reachnote_core::platform::{normalize_doctor_output, SourcePlatformStatus};
 use reachnote_core::task::{validate_article_url, ErrorKind, Task, TaskStatus};
 use reachnote_core::template::{
-    built_in_templates, canonical_template_id, suggest_template_id_for_url, ResearchTemplate,
+    canonical_template_id, suggest_template_id_for_url, template_registry, TemplateRegistry,
 };
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -133,8 +133,8 @@ fn create_capture_task(
 }
 
 #[tauri::command]
-fn list_templates() -> Vec<ResearchTemplate> {
-    built_in_templates().to_vec()
+fn list_templates() -> TemplateRegistry {
+    template_registry()
 }
 
 #[tauri::command]

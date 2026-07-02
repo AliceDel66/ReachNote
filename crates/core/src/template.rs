@@ -1,7 +1,6 @@
 use serde::Serialize;
 
 pub const DEFAULT_TEMPLATE_ID: &str = "web_article";
-const LEGACY_ARTICLE_TEMPLATE_ID: &str = "article";
 const OUTPUT_SCHEMA_RESEARCH_CARD_V1: &str = "research_card_v1";
 const TEMPLATE_DATE: &str = "2026-07-01";
 
@@ -24,6 +23,34 @@ pub struct ResearchTemplate {
     pub system: bool,
     pub created_at: &'static str,
     pub updated_at: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct TemplateAlias {
+    pub alias: &'static str,
+    pub template_id: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct PlatformRule {
+    pub platform_key: &'static str,
+    pub exact_hosts: &'static [&'static str],
+    pub host_suffixes: &'static [&'static str],
+    pub path_keywords: &'static [&'static str],
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct PlatformTemplateMapping {
+    pub platform_key: &'static str,
+    pub template_id: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct TemplateRegistry {
+    pub templates: &'static [ResearchTemplate],
+    pub template_aliases: &'static [TemplateAlias],
+    pub platform_rules: &'static [PlatformRule],
+    pub platform_template_mappings: &'static [PlatformTemplateMapping],
 }
 
 const NOTION_RESEARCH_CARD_MAPPING: &[TemplateDestinationMapping] = &[TemplateDestinationMapping {
@@ -110,19 +137,164 @@ pub const BUILT_IN_TEMPLATES: &[ResearchTemplate] = &[
     },
 ];
 
+pub const TEMPLATE_ALIASES: &[TemplateAlias] = &[TemplateAlias {
+    alias: "article",
+    template_id: DEFAULT_TEMPLATE_ID,
+}];
+
+pub const PLATFORM_RULES: &[PlatformRule] = &[
+    PlatformRule {
+        platform_key: "github",
+        exact_hosts: &["github.com"],
+        host_suffixes: &[],
+        path_keywords: &[],
+    },
+    PlatformRule {
+        platform_key: "youtube",
+        exact_hosts: &["youtu.be"],
+        host_suffixes: &["youtube.com"],
+        path_keywords: &[],
+    },
+    PlatformRule {
+        platform_key: "bilibili",
+        exact_hosts: &["b23.tv"],
+        host_suffixes: &["bilibili.com"],
+        path_keywords: &[],
+    },
+    PlatformRule {
+        platform_key: "xiaoyuzhou",
+        exact_hosts: &[],
+        host_suffixes: &["xiaoyuzhoufm.com"],
+        path_keywords: &[],
+    },
+    PlatformRule {
+        platform_key: "twitter",
+        exact_hosts: &["twitter.com", "x.com"],
+        host_suffixes: &[],
+        path_keywords: &[],
+    },
+    PlatformRule {
+        platform_key: "reddit",
+        exact_hosts: &[],
+        host_suffixes: &["reddit.com"],
+        path_keywords: &[],
+    },
+    PlatformRule {
+        platform_key: "facebook",
+        exact_hosts: &["fb.com"],
+        host_suffixes: &["facebook.com"],
+        path_keywords: &[],
+    },
+    PlatformRule {
+        platform_key: "instagram",
+        exact_hosts: &[],
+        host_suffixes: &["instagram.com"],
+        path_keywords: &[],
+    },
+    PlatformRule {
+        platform_key: "xiaohongshu",
+        exact_hosts: &["xhslink.com"],
+        host_suffixes: &["xiaohongshu.com"],
+        path_keywords: &[],
+    },
+    PlatformRule {
+        platform_key: "linkedin",
+        exact_hosts: &[],
+        host_suffixes: &["linkedin.com"],
+        path_keywords: &[],
+    },
+    PlatformRule {
+        platform_key: "v2ex",
+        exact_hosts: &["v2ex.com"],
+        host_suffixes: &[],
+        path_keywords: &[],
+    },
+    PlatformRule {
+        platform_key: "xueqiu",
+        exact_hosts: &[],
+        host_suffixes: &["xueqiu.com"],
+        path_keywords: &[],
+    },
+    PlatformRule {
+        platform_key: "rss",
+        exact_hosts: &[],
+        host_suffixes: &[],
+        path_keywords: &["rss", "feed"],
+    },
+];
+
+pub const PLATFORM_TEMPLATE_MAPPINGS: &[PlatformTemplateMapping] = &[
+    PlatformTemplateMapping {
+        platform_key: "web",
+        template_id: DEFAULT_TEMPLATE_ID,
+    },
+    PlatformTemplateMapping {
+        platform_key: "github",
+        template_id: "github_project",
+    },
+    PlatformTemplateMapping {
+        platform_key: "youtube",
+        template_id: "video_note",
+    },
+    PlatformTemplateMapping {
+        platform_key: "bilibili",
+        template_id: "video_note",
+    },
+    PlatformTemplateMapping {
+        platform_key: "xiaoyuzhou",
+        template_id: "video_note",
+    },
+    PlatformTemplateMapping {
+        platform_key: "rss",
+        template_id: "rss_digest",
+    },
+    PlatformTemplateMapping {
+        platform_key: "twitter",
+        template_id: "platform_discussion",
+    },
+    PlatformTemplateMapping {
+        platform_key: "reddit",
+        template_id: "platform_discussion",
+    },
+    PlatformTemplateMapping {
+        platform_key: "facebook",
+        template_id: "platform_discussion",
+    },
+    PlatformTemplateMapping {
+        platform_key: "instagram",
+        template_id: "platform_discussion",
+    },
+    PlatformTemplateMapping {
+        platform_key: "xiaohongshu",
+        template_id: "platform_discussion",
+    },
+    PlatformTemplateMapping {
+        platform_key: "linkedin",
+        template_id: "platform_discussion",
+    },
+    PlatformTemplateMapping {
+        platform_key: "v2ex",
+        template_id: "platform_discussion",
+    },
+];
+
 pub fn built_in_templates() -> &'static [ResearchTemplate] {
     BUILT_IN_TEMPLATES
 }
 
 pub fn canonical_template_id(value: &str) -> Option<&'static str> {
-    match value.trim() {
-        LEGACY_ARTICLE_TEMPLATE_ID | DEFAULT_TEMPLATE_ID => Some(DEFAULT_TEMPLATE_ID),
-        "github_project" => Some("github_project"),
-        "video_note" => Some("video_note"),
-        "rss_digest" => Some("rss_digest"),
-        "platform_discussion" => Some("platform_discussion"),
-        _ => None,
+    let trimmed = value.trim();
+    if let Some(template) = built_in_templates()
+        .iter()
+        .find(|template| template.id == trimmed)
+    {
+        return Some(template.id);
     }
+
+    TEMPLATE_ALIASES
+        .iter()
+        .find(|alias| alias.alias == trimmed)
+        .map(|alias| alias.template_id)
 }
 
 pub fn template_by_id(value: &str) -> Option<&'static ResearchTemplate> {
@@ -139,40 +311,62 @@ pub fn template_label(value: &str) -> &'static str {
 }
 
 pub fn suggest_template_id_for_url(url: &str) -> &'static str {
-    let Some((host, path)) = split_url_host_path(url) else {
+    let Some(platform_key) = platform_key_for_url(url) else {
         return DEFAULT_TEMPLATE_ID;
+    };
+
+    template_id_for_platform_key(platform_key).unwrap_or(DEFAULT_TEMPLATE_ID)
+}
+
+pub fn template_registry() -> TemplateRegistry {
+    TemplateRegistry {
+        templates: BUILT_IN_TEMPLATES,
+        template_aliases: TEMPLATE_ALIASES,
+        platform_rules: PLATFORM_RULES,
+        platform_template_mappings: PLATFORM_TEMPLATE_MAPPINGS,
+    }
+}
+
+pub fn platform_key_for_url(url: &str) -> Option<&'static str> {
+    let Some((host, path)) = split_url_host_path(url) else {
+        return None;
     };
     let host = host.strip_prefix("www.").unwrap_or(&host);
 
-    if host == "github.com" {
-        return "github_project";
-    }
-    if host == "youtu.be"
-        || host.ends_with("youtube.com")
-        || host.ends_with("bilibili.com")
-        || host == "b23.tv"
-        || host.ends_with("xiaoyuzhoufm.com")
-    {
-        return "video_note";
-    }
-    if path.contains("rss") || path.contains("feed") {
-        return "rss_digest";
-    }
-    if host == "twitter.com"
-        || host == "x.com"
-        || host.ends_with("reddit.com")
-        || host.ends_with("facebook.com")
-        || host == "fb.com"
-        || host.ends_with("instagram.com")
-        || host.ends_with("xiaohongshu.com")
-        || host == "xhslink.com"
-        || host.ends_with("linkedin.com")
-        || host == "v2ex.com"
-    {
-        return "platform_discussion";
+    for rule in PLATFORM_RULES {
+        if rule.exact_hosts.iter().any(|exact_host| *exact_host == host) {
+            return Some(rule.platform_key);
+        }
     }
 
-    DEFAULT_TEMPLATE_ID
+    for rule in PLATFORM_RULES {
+        if rule
+            .host_suffixes
+            .iter()
+            .any(|suffix| host_matches_suffix(host, suffix))
+        {
+            return Some(rule.platform_key);
+        }
+    }
+
+    for rule in PLATFORM_RULES {
+        if rule
+            .path_keywords
+            .iter()
+            .any(|keyword| path.contains(keyword))
+        {
+            return Some(rule.platform_key);
+        }
+    }
+
+    Some("web")
+}
+
+pub fn template_id_for_platform_key(platform_key: &str) -> Option<&'static str> {
+    PLATFORM_TEMPLATE_MAPPINGS
+        .iter()
+        .find(|mapping| mapping.platform_key == platform_key)
+        .map(|mapping| mapping.template_id)
 }
 
 fn split_url_host_path(url: &str) -> Option<(String, String)> {
@@ -196,6 +390,10 @@ fn split_url_host_path(url: &str) -> Option<(String, String)> {
     Some((host.to_string(), path))
 }
 
+fn host_matches_suffix(host: &str, suffix: &str) -> bool {
+    host == suffix || host.strip_suffix(suffix).is_some_and(|prefix| prefix.ends_with('.'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,22 +408,60 @@ mod tests {
     }
 
     #[test]
-    fn suggests_templates_from_url_shape() {
+    fn registry_exposes_alias_rules_and_mappings() {
+        let registry = template_registry();
+        assert_eq!(registry.templates.len(), 5);
+        assert_eq!(registry.template_aliases[0].alias, "article");
         assert_eq!(
-            suggest_template_id_for_url("https://github.com/AliceDel66/ReachNote"),
-            "github_project"
-        );
-        assert_eq!(
-            suggest_template_id_for_url("https://example.com/post"),
+            registry.template_aliases[0].template_id,
             DEFAULT_TEMPLATE_ID
         );
+        assert!(registry
+            .platform_rules
+            .iter()
+            .any(|rule| rule.platform_key == "github"));
+        assert_eq!(template_id_for_platform_key("github"), Some("github_project"));
+    }
+
+    #[test]
+    fn platform_rules_match_by_priority() {
         assert_eq!(
-            suggest_template_id_for_url("https://example.com/feed.xml"),
-            "rss_digest"
+            platform_key_for_url("https://github.com/AliceDel66/ReachNote/feed"),
+            Some("github")
         );
         assert_eq!(
-            suggest_template_id_for_url("https://www.youtube.com/watch?v=1"),
-            "video_note"
+            platform_key_for_url("https://www.youtube.com/watch?v=1"),
+            Some("youtube")
         );
+        assert_eq!(platform_key_for_url("https://youtu.be/abc"), Some("youtube"));
+        assert_eq!(
+            platform_key_for_url("https://www.bilibili.com/video/BV1"),
+            Some("bilibili")
+        );
+        assert_eq!(
+            platform_key_for_url("https://example.com/feed.xml"),
+            Some("rss")
+        );
+        assert_eq!(platform_key_for_url("https://x.com/openai"), Some("twitter"));
+        assert_eq!(platform_key_for_url("https://example.com/post"), Some("web"));
+        assert_eq!(platform_key_for_url("not a url"), None);
+    }
+
+    #[test]
+    fn suggests_templates_from_platform_rules() {
+        let cases = [
+            ("https://github.com/AliceDel66/ReachNote", "github_project"),
+            ("https://example.com/post", DEFAULT_TEMPLATE_ID),
+            ("https://example.com/feed.xml", "rss_digest"),
+            ("https://www.youtube.com/watch?v=1", "video_note"),
+            ("https://www.bilibili.com/video/BV1", "video_note"),
+            ("https://twitter.com/openai/status/1", "platform_discussion"),
+            ("https://xueqiu.com/1234567890", DEFAULT_TEMPLATE_ID),
+            ("not a url", DEFAULT_TEMPLATE_ID),
+        ];
+
+        for (url, expected) in cases {
+            assert_eq!(suggest_template_id_for_url(url), expected);
+        }
     }
 }

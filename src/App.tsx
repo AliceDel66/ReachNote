@@ -5,12 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CaptureView } from "./capture/CaptureView";
 import { AppHeader } from "./components/AppHeader";
 import { StatusBar } from "./components/StatusBar";
-import {
-  isAiProviderId,
-  normalizeTemplateId,
-  providerLabel,
-  templateForSourcePlatformKey
-} from "./constants";
+import { isAiProviderId, providerLabel } from "./constants";
 import { OnboardingView } from "./onboarding/OnboardingView";
 import { QueueView } from "./queue/QueueView";
 import { SettingsView } from "./settings/SettingsView";
@@ -24,19 +19,29 @@ import type {
   QueueLoadState,
   SourcePlatformStatus,
   Task,
-  TemplateId
+  TemplateId,
+  TemplateRegistry
 } from "./types";
 import {
   isValidArticleUrl,
   mergeTaskList,
+  normalizeTemplateId,
   readableError,
   sourcePlatformKeyForUrl,
   taskMatchesFilter,
+  templateForSourcePlatformKey,
+  templateItemsFromRegistry,
   taskToQueueRow,
   upsertTask
 } from "./utils";
 
 type SetupLoadState = "loading" | "ready" | "error";
+const EMPTY_TEMPLATE_REGISTRY: TemplateRegistry = {
+  templates: [],
+  template_aliases: [],
+  platform_rules: [],
+  platform_template_mappings: []
+};
 
 function preferredProvider(settings: AppSettings, environment: EnvironmentStatus): AiProviderId {
   if (isAiProviderId(settings.default_provider_id)) {
@@ -50,8 +55,8 @@ function preferredProvider(settings: AppSettings, environment: EnvironmentStatus
   return "claude_cli";
 }
 
-function preferredTemplate(settings: AppSettings): TemplateId {
-  return normalizeTemplateId(settings.default_template_id);
+function preferredTemplate(settings: AppSettings, templateRegistry: TemplateRegistry): TemplateId {
+  return normalizeTemplateId(settings.default_template_id, templateRegistry);
 }
 
 function App() {
@@ -74,6 +79,7 @@ function App() {
   const [isTogglingCompact, setIsTogglingCompact] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [environmentStatus, setEnvironmentStatus] = useState<EnvironmentStatus | null>(null);
+  const [templateRegistry, setTemplateRegistry] = useState<TemplateRegistry | null>(null);
   const [setupLoadState, setSetupLoadState] = useState<SetupLoadState>("loading");
   const [setupError, setSetupError] = useState<string | null>(null);
   const [isRefreshingEnvironment, setIsRefreshingEnvironment] = useState(false);
@@ -86,14 +92,16 @@ function App() {
   const loadSetup = useCallback(async () => {
     setSetupLoadState("loading");
     try {
-      const [settings, environment] = await Promise.all([
+      const [settings, environment, registry] = await Promise.all([
         invoke<AppSettings>("get_app_settings"),
-        invoke<EnvironmentStatus>("get_environment_status")
+        invoke<EnvironmentStatus>("get_environment_status"),
+        invoke<TemplateRegistry>("list_templates")
       ]);
       setAppSettings(settings);
       setEnvironmentStatus(environment);
+      setTemplateRegistry(registry);
       setSelectedProviderId(preferredProvider(settings, environment));
-      setSelectedTemplateId(preferredTemplate(settings));
+      setSelectedTemplateId(preferredTemplate(settings, registry));
       setSetupError(null);
       setSetupLoadState("ready");
     } catch (error) {
@@ -264,14 +272,26 @@ function App() {
     };
   }, [loadTasks]);
 
-  const queueRows = useMemo(() => tasks.map(taskToQueueRow), [tasks]);
+  const activeTemplateRegistry = templateRegistry ?? EMPTY_TEMPLATE_REGISTRY;
+  const templateItems = useMemo(
+    () => templateItemsFromRegistry(activeTemplateRegistry),
+    [activeTemplateRegistry]
+  );
+  const queueRows = useMemo(
+    () => tasks.map((task) => taskToQueueRow(task, activeTemplateRegistry)),
+    [activeTemplateRegistry, tasks]
+  );
   const defaultTemplateId = useMemo(
-    () => normalizeTemplateId(appSettings?.default_template_id),
-    [appSettings?.default_template_id]
+    () => normalizeTemplateId(appSettings?.default_template_id, activeTemplateRegistry),
+    [activeTemplateRegistry, appSettings?.default_template_id]
+  );
+  const sourcePlatformKey = useMemo(
+    () => sourcePlatformKeyForUrl(url, activeTemplateRegistry.platform_rules),
+    [activeTemplateRegistry.platform_rules, url]
   );
   const suggestedTemplateId = useMemo(
-    () => templateForSourcePlatformKey(sourcePlatformKeyForUrl(url)),
-    [url]
+    () => templateForSourcePlatformKey(sourcePlatformKey, activeTemplateRegistry),
+    [activeTemplateRegistry, sourcePlatformKey]
   );
 
   useEffect(() => {
@@ -328,9 +348,10 @@ function App() {
     setUrl(nextUrl);
     setCaptureError(null);
     if (!templateSelectionDirty) {
-      setSelectedTemplateId(templateForSourcePlatformKey(sourcePlatformKeyForUrl(nextUrl)));
+      const nextPlatformKey = sourcePlatformKeyForUrl(nextUrl, activeTemplateRegistry.platform_rules);
+      setSelectedTemplateId(templateForSourcePlatformKey(nextPlatformKey, activeTemplateRegistry));
     }
-  }, [templateSelectionDirty]);
+  }, [activeTemplateRegistry, templateSelectionDirty]);
 
   const handleRunTask = useCallback(async (id: string) => {
     setRetryingTaskId(id);
@@ -428,7 +449,8 @@ function App() {
       const nextUrl = clipboardText.trim();
       setUrl(nextUrl);
       if (!templateSelectionDirty) {
-        setSelectedTemplateId(templateForSourcePlatformKey(sourcePlatformKeyForUrl(nextUrl)));
+        const nextPlatformKey = sourcePlatformKeyForUrl(nextUrl, activeTemplateRegistry.platform_rules);
+        setSelectedTemplateId(templateForSourcePlatformKey(nextPlatformKey, activeTemplateRegistry));
       }
       setCaptureError(null);
     } catch {
@@ -436,7 +458,7 @@ function App() {
     }
   };
 
-  if (setupLoadState !== "ready" || !appSettings || !environmentStatus) {
+  if (setupLoadState !== "ready" || !appSettings || !environmentStatus || !templateRegistry) {
     return (
       <LoadingScreen
         state={setupLoadState}
@@ -508,11 +530,13 @@ function App() {
             selectedProviderId={selectedProviderId}
             selectedTemplateId={selectedTemplateId}
             suggestedTemplateId={suggestedTemplateId}
+            templates={templateItems}
             onProviderChange={(providerId) => void saveProviderSelection(providerId)}
             onTemplateChange={(templateId) => void saveTemplateSelection(templateId)}
             onSubmit={handleCaptureSubmit}
             onPasteFromClipboard={handlePasteFromClipboard}
             onOpenSettings={() => setActiveNav("settings")}
+            sourcePlatformKey={sourcePlatformKey}
             sourcePlatforms={environmentStatus.source_platforms}
             sourcePlatformsChecked={environmentStatus.source_platforms_checked}
           />
@@ -521,6 +545,7 @@ function App() {
           <TemplatesView
             defaultTemplateId={defaultTemplateId}
             selectedTemplateId={selectedTemplateId}
+            templates={templateItems}
             onTemplateChange={(templateId) => void saveTemplateSelection(templateId)}
           />
         )}

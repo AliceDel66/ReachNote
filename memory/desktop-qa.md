@@ -1,12 +1,12 @@
 # Desktop QA
 
-Last updated: 2026-07-01
+Last updated: 2026-07-02
 
 ## Current Snapshot
 
-状态：PASS / Slice A worker queue smoke verified in isolated QA app
+状态：PASS / Slice B template and route single source verified in isolated QA app
 
-旧桌面实现清空后，本轮已恢复 `pnpm tauri dev` 可运行的 Tauri dev app。命令已编译并运行 `target/debug/reachnote-app`。最新桌面验证确认 Slice A worker queue 在隔离 `ReachNote QA.app` 可见：创建公开 example.com 任务后，Queue 通过 worker event 显示 `读取中`、`分析中`，最终变为 `失败/notion_unauthorized`，DB 保留 `analysis_json`，行内显示重试入口。此前原生 ReachNote status item、Slice 2 平台矩阵和 Slice 3 模板选择均已通过 QA app 路径验证。Computer Use 仍不绑定裸 dev app，用户可见 PASS 继续走 QA app。
+旧桌面实现清空后，本轮已恢复 `pnpm tauri dev` 可运行的 Tauri dev app。命令已编译并运行 `target/debug/reachnote-app`。最新桌面验证确认 Slice B 模板/路由单一真源在隔离 `ReachNote QA.app` 可见：模板页显示 backend registry 的 5 个系统模板，GitHub 默认模板重启后仍持久化；Capture 页对 GitHub、YouTube、RSS feed URL 分别推荐 GitHub 项目分析、视频笔记和 RSS 简报；Queue 对 QA SQLite 中 `template_id=video_note` 的本地假任务显示 `视频笔记`。此前 Slice A worker queue、原生 ReachNote status item、Slice 2 平台矩阵和 Slice 3 模板选择均已通过 QA app 路径验证。Computer Use 仍不绑定裸 dev app，用户可见 PASS 继续走 QA app。
 
 注意：旧问题的根因是 `pnpm tauri dev` 运行裸二进制 `target/debug/reachnote-app`，Computer Use 不能稳定按裸二进制绑定；按 `ReachNote` 名称会启动 `target/debug/bundle/macos/ReachNote.app`。当前修复是新增隔离安装版 smoke 路径：`ReachNote QA.app` / `com.reachnote.qa` / 独立 app data。后续用户可见桌面切片优先用 QA app 做 Computer Use PASS，再用正式 app 做发布前检查。
 
@@ -40,6 +40,8 @@ Last updated: 2026-07-01
 - Slice 3 QA known failure：GitHub QA task 失败在 `GitHub reader 请求失败: error sending request for url (https://api.github.com/repos/AliceDel66/ReachNote)`；这是本机网络/API reader 层失败，不是模板选择、持久化或 reload 问题。验证未配置 Notion，未写第三方 Notion 数据。
 - Slice A QA worker queue：PASS。`scripts/desktop-smoke-qa.sh --reset-data` 构建 `ReachNote QA.app`，Computer Use 绑定 `/Users/yaocheng/Desktop/nexus/rearchnote/target/debug/bundle/macos/ReachNote QA.app`。新库 onboarding 进入 Queue 后为空态；在 Capture 页输入公开 `https://example.com/reachnote-slice-a-worker-smoke` 并提交，Queue 立即显示 `读取中`，随后显示 `分析中`，最终显示红色 `失败`、行内 `尚未配置 Notion 连接...`、`重试` 按钮。SQLite 验证最新 task 为 `failed/notion_unauthorized`、`analysis_json IS NOT NULL`、`notion_page_id NULL`。点击重试后 worker 再次快速回到同一失败态，未写 Notion。
 - Slice A QA note：本轮尝试用环境变量重启 QA app 指向本地拒绝 reader，但 Computer Use 重新打开 bundle 后实际进程仍走正常 app 环境；测试 URL 为公开 example.com，未配置 Notion，未传输私密内容或写第三方 Notion。
+- Slice B QA template/route：PASS。`scripts/desktop-smoke-qa.sh --reset-data` 构建 `ReachNote QA.app`；Computer Use 绑定 `/Users/yaocheng/Desktop/nexus/rearchnote/target/debug/bundle/macos/ReachNote QA.app`。onboarding 进入 Queue 后为空态；模板页显示 5 个系统模板，默认 `网页文章笔记`；点击 GitHub「设为默认」后 UI 显示默认，重启 QA app 后 GitHub 仍为默认。Capture 页空 URL 时推荐 `网页文章笔记`，输入公开 `https://github.com/AliceDel66/ReachNote` 后 source hint 显示 GitHub 且推荐 `GitHub 项目分析`，输入 `https://www.youtube.com/watch?v=dQw4w9WgXcQ` 后推荐 `视频笔记`，输入 `https://example.com/feed.xml` 后推荐 `RSS 简报`。
+- Slice B QA queue label：PASS。为避免点击 CTA 触发真实 Claude/Notion 路径，直接向隔离 QA SQLite `~/Library/Application Support/com.reachnote.qa/reachnote.db` 插入一条 `status=failed` 的本地假任务 `template_id=video_note`；重启 QA app 后 Queue 模板列显示 `视频笔记`，证明队列 label 也消费 backend registry 派生数据。本轮未配置 Notion，未写第三方 Notion 数据；假任务仅留在 `com.reachnote.qa` 隔离数据目录。
 - QA screenshot：`/tmp/reachnote-worker-provider-unavailable.png`，用于本轮人工视觉核对；截图不提交仓库。
 - QA screenshot：`/tmp/reachnote-analysis-success.png`，用于本轮结构化分析成功路径视觉核对；截图不提交仓库。
 - QA screenshot：`/tmp/reachnote-notion-synced-queue.png`，用于本轮 Notion sync UI smoke 视觉核对；截图不提交仓库。

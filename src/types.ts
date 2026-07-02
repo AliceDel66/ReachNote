@@ -60,15 +60,58 @@ export interface QueueRow {
   notionPageId: string | null;
 }
 
+export interface BackendTemplateDestinationMapping {
+  destination_id: string;
+  field_mapping: string;
+}
+
+export interface BackendTemplate {
+  id: string;
+  name: string;
+  description: string;
+  compatible_source_types: string[];
+  prompt_profile: string;
+  output_schema: string;
+  destination_mappings: BackendTemplateDestinationMapping[];
+  enabled: boolean;
+  system: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplateAlias {
+  alias: string;
+  template_id: string;
+}
+
+export interface PlatformRule {
+  platform_key: string;
+  exact_hosts: string[];
+  host_suffixes: string[];
+  path_keywords: string[];
+}
+
+export interface PlatformTemplateMapping {
+  platform_key: string;
+  template_id: string;
+}
+
+export interface TemplateRegistry {
+  templates: BackendTemplate[];
+  template_aliases: TemplateAlias[];
+  platform_rules: PlatformRule[];
+  platform_template_mappings: PlatformTemplateMapping[];
+}
+
 export interface TemplateItem {
-  id: TemplateId;
-  title: string;
+  id: string;
+  name: string;
   description: string;
   icon: "github" | "article" | "video" | "rss";
   chips: string[];
-  compatibleSourceTypes: string[];
-  promptProfile: string;
-  state?: "planned" | "preview";
+  compatible_source_types: string[];
+  prompt_profile: string;
+  enabled: boolean;
 }
 
 export interface AppSettings {
