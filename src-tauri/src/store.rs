@@ -113,6 +113,7 @@ impl TaskStore {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn update_task(&self, task: &Task) -> Result<(), StoreError> {
         validate_task_for_storage(task)?;
         let connection = self.lock_connection()?;
@@ -168,6 +169,256 @@ impl TaskStore {
         Ok(())
     }
 
+    pub fn update_task_if_status(
+        &self,
+        task: &Task,
+        expected_status: TaskStatus,
+    ) -> Result<Option<Task>, StoreError> {
+        validate_task_for_storage(task)?;
+        let connection = self.lock_connection()?;
+        connection
+            .query_row(
+                "UPDATE tasks SET
+                    url = ?2,
+                    source_type = ?3,
+                    template_id = ?4,
+                    status = ?5,
+                    title = ?6,
+                    source_domain = ?7,
+                    score = ?8,
+                    model = ?9,
+                    provider_id = ?10,
+                    note = ?11,
+                    analysis_json = ?12,
+                    notion_page_id = ?13,
+                    error_kind = ?14,
+                    error_message = ?15,
+                    created_at = ?16,
+                    updated_at = ?17,
+                    synced_at = ?18
+                WHERE id = ?1 AND status = ?19
+                RETURNING
+                    id, url, source_type, template_id, status, title, source_domain,
+                    score, model, provider_id, note, analysis_json, notion_page_id,
+                    error_kind, error_message, created_at, updated_at, synced_at",
+                params![
+                    &task.id,
+                    &task.url,
+                    &task.source_type,
+                    &task.template_id,
+                    task.status.as_str(),
+                    &task.title,
+                    &task.source_domain,
+                    task.score.map(i64::from),
+                    &task.model,
+                    &task.provider_id,
+                    &task.note,
+                    &task.analysis_json,
+                    &task.notion_page_id,
+                    task.error_kind.map(ErrorKind::as_str),
+                    &task.error_message,
+                    &task.created_at,
+                    &task.updated_at,
+                    &task.synced_at,
+                    expected_status.as_str(),
+                ],
+                map_task_row,
+            )
+            .optional()
+            .map_err(StoreError::database)
+    }
+
+    pub fn claim_task(
+        &self,
+        id: &str,
+        from_status: TaskStatus,
+        to_status: TaskStatus,
+        now: &str,
+    ) -> Result<Option<Task>, StoreError> {
+        let connection = self.lock_connection()?;
+        connection
+            .query_row(
+                "UPDATE tasks SET
+                    status = ?3,
+                    error_kind = NULL,
+                    error_message = NULL,
+                    updated_at = ?4
+                WHERE id = ?1 AND status = ?2
+                RETURNING
+                    id, url, source_type, template_id, status, title, source_domain,
+                    score, model, provider_id, note, analysis_json, notion_page_id,
+                    error_kind, error_message, created_at, updated_at, synced_at",
+                params![id, from_status.as_str(), to_status.as_str(), now],
+                map_task_row,
+            )
+            .optional()
+            .map_err(StoreError::database)
+    }
+
+    pub fn claim_next_queued_task(&self, now: &str) -> Result<Option<Task>, StoreError> {
+        let connection = self.lock_connection()?;
+        connection
+            .query_row(
+                "UPDATE tasks SET
+                    status = ?1,
+                    error_kind = NULL,
+                    error_message = NULL,
+                    updated_at = ?2
+                WHERE id = (
+                    SELECT id FROM tasks
+                    WHERE status = ?3
+                    ORDER BY CAST(created_at AS INTEGER) ASC, id ASC
+                    LIMIT 1
+                )
+                RETURNING
+                    id, url, source_type, template_id, status, title, source_domain,
+                    score, model, provider_id, note, analysis_json, notion_page_id,
+                    error_kind, error_message, created_at, updated_at, synced_at",
+                params![
+                    TaskStatus::Reading.as_str(),
+                    now,
+                    TaskStatus::Queued.as_str()
+                ],
+                map_task_row,
+            )
+            .optional()
+            .map_err(StoreError::database)
+    }
+
+    pub fn claim_next_pending_sync_task(&self, now: &str) -> Result<Option<Task>, StoreError> {
+        let connection = self.lock_connection()?;
+        connection
+            .query_row(
+                "UPDATE tasks SET
+                    status = ?1,
+                    error_kind = NULL,
+                    error_message = NULL,
+                    updated_at = ?2
+                WHERE id = (
+                    SELECT id FROM tasks
+                    WHERE status = ?3
+                        AND analysis_json IS NOT NULL
+                        AND notion_page_id IS NULL
+                    ORDER BY CAST(created_at AS INTEGER) ASC, id ASC
+                    LIMIT 1
+                )
+                RETURNING
+                    id, url, source_type, template_id, status, title, source_domain,
+                    score, model, provider_id, note, analysis_json, notion_page_id,
+                    error_kind, error_message, created_at, updated_at, synced_at",
+                params![
+                    TaskStatus::Syncing.as_str(),
+                    now,
+                    TaskStatus::Analyzed.as_str()
+                ],
+                map_task_row,
+            )
+            .optional()
+            .map_err(StoreError::database)
+    }
+
+    pub fn claim_next_finalization_task(&self, now: &str) -> Result<Option<Task>, StoreError> {
+        let connection = self.lock_connection()?;
+        // Includes Syncing -> Syncing to finish a task after notion_page_id was persisted
+        // but the app crashed before the final Synced transition.
+        connection
+            .query_row(
+                "UPDATE tasks SET
+                    status = ?1,
+                    updated_at = ?2
+                WHERE id = (
+                    SELECT id FROM tasks
+                    WHERE status IN (?3, ?4, ?5)
+                        AND notion_page_id IS NOT NULL
+                    ORDER BY CAST(created_at AS INTEGER) ASC, id ASC
+                    LIMIT 1
+                )
+                RETURNING
+                    id, url, source_type, template_id, status, title, source_domain,
+                    score, model, provider_id, note, analysis_json, notion_page_id,
+                    error_kind, error_message, created_at, updated_at, synced_at",
+                params![
+                    TaskStatus::Syncing.as_str(),
+                    now,
+                    TaskStatus::Analyzed.as_str(),
+                    TaskStatus::Failed.as_str(),
+                    TaskStatus::Syncing.as_str()
+                ],
+                map_task_row,
+            )
+            .optional()
+            .map_err(StoreError::database)
+    }
+
+    pub fn fail_next_analyzed_without_result(&self, now: &str) -> Result<Option<Task>, StoreError> {
+        let connection = self.lock_connection()?;
+        // Defensive repair for impossible Analyzed rows without a structured card.
+        connection
+            .query_row(
+                "UPDATE tasks SET
+                    status = ?1,
+                    error_kind = ?2,
+                    error_message = ?3,
+                    updated_at = ?4
+                WHERE id = (
+                    SELECT id FROM tasks
+                    WHERE status = ?5
+                        AND analysis_json IS NULL
+                    ORDER BY CAST(created_at AS INTEGER) ASC, id ASC
+                    LIMIT 1
+                )
+                RETURNING
+                    id, url, source_type, template_id, status, title, source_domain,
+                    score, model, provider_id, note, analysis_json, notion_page_id,
+                    error_kind, error_message, created_at, updated_at, synced_at",
+                params![
+                    TaskStatus::Failed.as_str(),
+                    ErrorKind::ParseFailed.as_str(),
+                    "分析结果为空，无法同步到 Notion",
+                    now,
+                    TaskStatus::Analyzed.as_str()
+                ],
+                map_task_row,
+            )
+            .optional()
+            .map_err(StoreError::database)
+    }
+
+    pub fn finalize_synced_task(
+        &self,
+        id: &str,
+        synced_at: &str,
+        now: &str,
+    ) -> Result<Option<Task>, StoreError> {
+        let connection = self.lock_connection()?;
+        connection
+            .query_row(
+                "UPDATE tasks SET
+                    status = ?2,
+                    error_kind = NULL,
+                    error_message = NULL,
+                    synced_at = COALESCE(synced_at, ?3),
+                    updated_at = ?4
+                WHERE id = ?1
+                    AND status = ?5
+                    AND notion_page_id IS NOT NULL
+                RETURNING
+                    id, url, source_type, template_id, status, title, source_domain,
+                    score, model, provider_id, note, analysis_json, notion_page_id,
+                    error_kind, error_message, created_at, updated_at, synced_at",
+                params![
+                    id,
+                    TaskStatus::Synced.as_str(),
+                    synced_at,
+                    now,
+                    TaskStatus::Syncing.as_str()
+                ],
+                map_task_row,
+            )
+            .optional()
+            .map_err(StoreError::database)
+    }
+
     pub fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let connection = self.lock_connection()?;
         let mut statement = connection.prepare(
@@ -186,6 +437,7 @@ impl TaskStore {
         Ok(tasks)
     }
 
+    #[cfg(test)]
     pub fn list_pending_sync_tasks(&self) -> Result<Vec<Task>, StoreError> {
         Ok(self
             .list_tasks()?
@@ -388,8 +640,9 @@ impl TaskStore {
             task.error_kind = Some(ErrorKind::ReadFailed);
             task.error_message = Some(interrupted_task_message(previous_status).to_string());
             task.updated_at = now.to_string();
-            self.update_task(&task)?;
-            recovered_tasks.push(task);
+            if let Some(updated) = self.update_task_if_status(&task, previous_status)? {
+                recovered_tasks.push(updated);
+            }
         }
 
         Ok(recovered_tasks)
@@ -424,10 +677,10 @@ impl TaskStore {
     }
 
     fn lock_connection(&self) -> Result<std::sync::MutexGuard<'_, Connection>, StoreError> {
-        self.connection.lock().map_err(|_| StoreError {
-            kind: ErrorKind::ReadFailed,
-            message: "本地队列数据库连接已不可用".to_string(),
-        })
+        Ok(self
+            .connection
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()))
     }
 }
 
@@ -769,6 +1022,7 @@ fn interrupted_task_message(status: TaskStatus) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn task_needs_auto_sync(task: &Task) -> bool {
     task.status == TaskStatus::Analyzed
         && task.analysis_json.is_some()
@@ -790,6 +1044,8 @@ fn int_to_bool(value: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
 
     fn memory_store() -> TaskStore {
         let store = TaskStore {
@@ -1005,6 +1261,112 @@ mod tests {
         let tasks = store.list_pending_sync_tasks().unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].id, pending.id);
+    }
+
+    #[test]
+    fn claim_task_is_single_winner_under_concurrency() {
+        let store = Arc::new(memory_store());
+        let task = sample_task("task-claim");
+        store.insert_task(&task).unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+
+        let handles = (0..2)
+            .map(|index| {
+                let store = Arc::clone(&store);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    store
+                        .claim_task(
+                            "task-claim",
+                            TaskStatus::Queued,
+                            TaskStatus::Reading,
+                            &format!("20{index}"),
+                        )
+                        .unwrap()
+                        .is_some()
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let winners = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .filter(|won| *won)
+            .count();
+        assert_eq!(winners, 1);
+        assert_eq!(
+            store.get_task("task-claim").unwrap().unwrap().status,
+            TaskStatus::Reading
+        );
+    }
+
+    #[test]
+    fn claim_next_queued_task_is_fifo_and_status_guarded() {
+        let store = memory_store();
+        let mut newer = sample_task("z-newer");
+        newer.created_at = "200".to_string();
+        let mut same_time_b = sample_task("b-same-time");
+        same_time_b.created_at = "100".to_string();
+        let mut same_time_a = sample_task("a-same-time");
+        same_time_a.created_at = "100".to_string();
+
+        for task in [&newer, &same_time_b, &same_time_a] {
+            store.insert_task(task).unwrap();
+        }
+
+        let mismatch = store
+            .claim_task(
+                "a-same-time",
+                TaskStatus::Analyzed,
+                TaskStatus::Syncing,
+                "210",
+            )
+            .unwrap();
+        assert!(mismatch.is_none());
+
+        let first = store.claim_next_queued_task("211").unwrap().unwrap();
+        assert_eq!(first.id, "a-same-time");
+        let second = store.claim_next_queued_task("212").unwrap().unwrap();
+        assert_eq!(second.id, "b-same-time");
+        let third = store.claim_next_queued_task("213").unwrap().unwrap();
+        assert_eq!(third.id, "z-newer");
+        assert!(store.claim_next_queued_task("214").unwrap().is_none());
+    }
+
+    #[test]
+    fn pending_sync_claim_excludes_syncing_reentry() {
+        let store = memory_store();
+        let mut syncing = sample_task("syncing");
+        syncing.status = TaskStatus::Syncing;
+        syncing.analysis_json = Some(r#"{"title":"已有同步中研究卡"}"#.to_string());
+        store.insert_task(&syncing).unwrap();
+
+        assert!(store.claim_next_pending_sync_task("200").unwrap().is_none());
+        assert_eq!(
+            store.get_task("syncing").unwrap().unwrap().status,
+            TaskStatus::Syncing
+        );
+    }
+
+    #[test]
+    fn finalization_claim_and_finalize_complete_page_id_task() {
+        let store = memory_store();
+        let mut task = sample_task("finalize");
+        task.status = TaskStatus::Failed;
+        task.analysis_json = Some(r#"{"title":"已创建页面"}"#.to_string());
+        task.notion_page_id = Some("page-id".to_string());
+        store.insert_task(&task).unwrap();
+
+        let claimed = store.claim_next_finalization_task("200").unwrap().unwrap();
+        assert_eq!(claimed.status, TaskStatus::Syncing);
+        assert_eq!(claimed.notion_page_id.as_deref(), Some("page-id"));
+        let finalized = store
+            .finalize_synced_task(&claimed.id, "201", "202")
+            .unwrap()
+            .unwrap();
+        assert_eq!(finalized.status, TaskStatus::Synced);
+        assert_eq!(finalized.synced_at.as_deref(), Some("201"));
     }
 
     #[test]

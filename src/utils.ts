@@ -22,13 +22,34 @@ export function upsertTask(tasks: Task[], nextTask: Task): Task[] {
   const nextTasks = tasks.map((task) => {
     if (task.id === nextTask.id) {
       replaced = true;
-      return nextTask;
+      return taskIsNewerOrEqual(nextTask, task) ? nextTask : task;
     }
 
     return task;
   });
 
   return replaced ? nextTasks : [nextTask, ...nextTasks];
+}
+
+export function mergeTaskList(tasks: Task[], nextTasks: Task[]): Task[] {
+  const byId = new Map<string, Task>();
+  tasks.forEach((task) => byId.set(task.id, task));
+  nextTasks.forEach((task) => {
+    const current = byId.get(task.id);
+    if (!current || taskIsNewerOrEqual(task, current)) {
+      byId.set(task.id, task);
+    }
+  });
+
+  return Array.from(byId.values()).sort((left, right) => {
+    const leftCreated = Number(left.created_at);
+    const rightCreated = Number(right.created_at);
+    if (Number.isFinite(leftCreated) && Number.isFinite(rightCreated) && leftCreated !== rightCreated) {
+      return rightCreated - leftCreated;
+    }
+
+    return right.id.localeCompare(left.id);
+  });
 }
 
 export function taskMatchesFilter(status: TaskStatus, filter: QueueFilter): boolean {
@@ -49,7 +70,7 @@ export function taskMatchesFilter(status: TaskStatus, filter: QueueFilter): bool
 
 export function statusLabel(status: TaskStatus): string {
   const labels: Record<TaskStatus, string> = {
-    queued: "排队中",
+    queued: "等待处理",
     reading: "读取中",
     analyzing: "分析中",
     analyzed: "已分析",
@@ -59,6 +80,16 @@ export function statusLabel(status: TaskStatus): string {
   };
 
   return labels[status];
+}
+
+function taskIsNewerOrEqual(nextTask: Task, currentTask: Task): boolean {
+  const nextUpdatedAt = Number(nextTask.updated_at);
+  const currentUpdatedAt = Number(currentTask.updated_at);
+  if (Number.isFinite(nextUpdatedAt) && Number.isFinite(currentUpdatedAt)) {
+    return nextUpdatedAt >= currentUpdatedAt;
+  }
+
+  return nextTask.updated_at >= currentTask.updated_at;
 }
 
 export function formatTimestamp(value: string): string {

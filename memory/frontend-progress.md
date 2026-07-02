@@ -97,3 +97,12 @@ Last updated: 2026-07-01
 - Slice 2 Settings：新增平台矩阵 loading/empty/error/success 状态；`run_agent_reach_doctor` 成功后重新拉取 `get_environment_status` 读取最新快照。矩阵行显示 name/key、availability pill、active backend、action 标签和截断 message，完整 message 放在 title。
 - Slice 2 Capture：新增 `sourcePlatformKeyForUrl` 与只读提示，不强制 disable CTA，不改变现有 `create_capture_task -> run_capture_task` 链路。桌面 QA 中 YouTube 提示已验证；GitHub 输入在 Computer Use 粘贴路径上反复触发提交风险，因此以 Settings 矩阵和 snapshot 验证 GitHub `ready/read_content`，未再冒险做第三次提交。
 - Slice 3 Templates/Capture/Queue：新增 `TemplateId`、`normalizeTemplateId`、`templateForSourcePlatformKey` 和 `templateLabel`；`App.tsx` 持有 `selectedTemplateId`，用户选择模板时调用 `save_app_settings(defaultTemplateId)`，创建任务时传 `templateId`。Capture 页使用 URL key 显示推荐模板；Queue 行新增模板列并把模板 label 纳入搜索。
+
+### 2026-07-02
+
+- Slice A queue observer：`App.tsx` 启动任务列表时先注册 `listen<Task>("task:updated")` 和 `listen<string>("worker:error")`，再调用一次 `list_capture_tasks`。已删除前端启动/刷新中的 `recover_interrupted_tasks`、`sync_pending_analyzed_tasks` 和 1.2 秒三 invoke 轮询；现在只保留 30 秒 `list_capture_tasks` 兜底和 window focus refresh。
+- Slice A submit/retry 行为：采集提交后只 `create_capture_task` 并切回 Queue，不再 `handleRunTask(createdTask.id)`；`retry_capture_task` 只接收后端 CAS reset 返回并等待 worker event。Queued 行新增 `立即处理` inline fallback，调用 `run_capture_task`，claim 失败由后端返回当前任务而非前端报错。
+- Slice A merge 规则：`upsertTask` / `mergeTaskList` 按 `id` 合并，并用 `updated_at` 新旧决定是否覆盖；queued 状态文案改为“等待处理”。
+- Slice A review P2 fix：`handleRetryTask` 改为 functional state update，不再闭包依赖 `tasks`；`handleRunTask` 点击“立即处理”后对 queued 行乐观显示 `reading`，等待后端 CAS/worker event 校正。
+- Slice A 桌面 QA：隔离 `ReachNote QA.app` / `com.reachnote.qa` 中，Computer Use 创建公开 `https://example.com/reachnote-slice-a-worker-smoke` 任务。队列先显示 `读取中`，随后显示 `分析中`，最终显示红色 `失败`、行内 Notion 未配置原因、`重试` 按钮；DB 同步显示 `failed/notion_unauthorized` 且 `analysis_json IS NOT NULL`。点击重试后仍由 worker 回到同一失败态。
+- Slice A 验证：`pnpm typecheck`、`pnpm build` 通过；`scripts/desktop-smoke-qa.sh --reset-data` 构建 QA app 通过，Computer Use 可绑定 QA app。

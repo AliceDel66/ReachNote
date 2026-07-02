@@ -89,3 +89,13 @@ Last updated: 2026-07-01
 - Slice 3 core：新增 `crates/core/src/template.rs` 静态注册表，注册 `web_article`、`github_project`、`video_note`、`rss_digest`、`platform_discussion`，所有模板共用 `research_card_v1` 输出 schema。旧 `article` canonical 为 `web_article`，用于兼容既有 app_settings/tasks。
 - Slice 3 command/store：`create_capture_task` 新增可选 `template_id` 参数，缺省时按 URL 推荐 `github_project` / `video_note` / `rss_digest` / `platform_discussion` / `web_article`；`save_app_settings` 保存默认模板时 canonical 化；`TaskStore` 不再硬编码只允许 `article` template，而是校验注册表；新空库默认 template 为 `web_article`。
 - Slice 3 prompt：`build_analysis_prompt` 读取注册模板并注入模板名、模板意图和 shared schema 约束，不拆分 `AnalysisResult`。
+
+### 2026-07-02
+
+- Slice A backend worker：新增 `src-tauri/src/worker.rs`，把原 `lib.rs` 中的 capture/sync/retry/pending sync blocking 链路迁出；`lib.rs` 现在保留 command 注册、参数校验、tray/setup 和 worker notify。Tauri setup 创建唯一后台 worker thread，使用 `std::sync::mpsc::Receiver::recv_timeout` 唤醒并 drain 到 Idle。
+- Slice A CAS 状态机：`TaskStore` 新增 `claim_task`、`claim_next_queued_task`、`claim_next_pending_sync_task`、`claim_next_finalization_task`、`fail_next_analyzed_without_result`、`finalize_synced_task` 和 `update_task_if_status`；queued claim FIFO 为 `ORDER BY CAST(created_at AS INTEGER) ASC, id ASC LIMIT 1`。`recover_stale_processing_tasks` 改为带 previous status 的 CAS 更新，`lock_connection` 改为 poison recovery。
+- Slice A sync finalization：`Syncing` 成功创建 Notion page 后先 CAS 写 `notion_page_id`，再 `finalize_synced_task` 写 `Synced/synced_at`；`Analyzed/Failed/Syncing + notion_page_id` 会走 finalization，不再重复 `create_page`。`Analyzed + analysis_json NULL` 会落为 `Failed/parse_failed`；Notion 未配置的 analyzed 任务只失败一次，不会被 pending sync 再次选中。
+- Slice A worker visibility：worker claim、transition、emit failure、notify failure、panic/store error 均以 `[worker]` 前缀 `eprintln!`；outer loop 使用 panic catch，连续错误达到 3 次时 emit `worker:error`。`effective_stale_task_seconds()` = `max(REACHNOTE_STALE_TASK_SECS, max(AI/reader/Notion timeout)+60)`，默认仍为 300 秒。
+- Slice A review P2 fix：为 `claim_next_finalization_task` 的 `Syncing -> Syncing` crash recovery self-loop 和 `Analyzed + analysis_json NULL` 防御性修复补了代码注释；跨系统 `create_page` 成功但 `notion_page_id` 未落盘的 crash window 是审查报告已接受 residual risk。
+- Slice A tests：`cargo test --manifest-path src-tauri/Cargo.toml` 通过，52 passed / 1 ignored；新增/更新覆盖并发 claim 单赢家、FIFO/status guard、syncing 不重入、page_id finalization、queued orphan worker tick、early-write crash finalization、Notion 未配置失败一次、invalid analyzed parse_failed、multi queued drain、panic catch/continue、retry reset。
+- Slice A 验证：`cargo check --manifest-path src-tauri/Cargo.toml`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo test -p reachnote-core`、`pnpm typecheck`、`pnpm build`、`git diff --check` 均通过。

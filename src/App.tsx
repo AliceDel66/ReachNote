@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { CaptureView } from "./capture/CaptureView";
@@ -8,7 +9,6 @@ import {
   isAiProviderId,
   normalizeTemplateId,
   providerLabel,
-  STALE_TASK_SECONDS,
   templateForSourcePlatformKey
 } from "./constants";
 import { OnboardingView } from "./onboarding/OnboardingView";
@@ -28,6 +28,7 @@ import type {
 } from "./types";
 import {
   isValidArticleUrl,
+  mergeTaskList,
   readableError,
   sourcePlatformKeyForUrl,
   taskMatchesFilter,
@@ -59,6 +60,7 @@ function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [queueLoadState, setQueueLoadState] = useState<QueueLoadState>("loading");
   const [queueError, setQueueError] = useState<string | null>(null);
+  const [workerError, setWorkerError] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [url, setUrl] = useState("");
@@ -209,10 +211,8 @@ function App() {
   const loadTasks = useCallback(async () => {
     setQueueLoadState("loading");
     try {
-      await invoke<Task[]>("recover_interrupted_tasks", { staleAfterSeconds: STALE_TASK_SECONDS });
-      await invoke<Task[]>("sync_pending_analyzed_tasks");
       const nextTasks = await invoke<Task[]>("list_capture_tasks");
-      setTasks(nextTasks);
+      setTasks((currentTasks) => mergeTaskList(currentTasks, nextTasks));
       setQueueError(null);
       setQueueLoadState("ready");
     } catch (error) {
@@ -223,10 +223,8 @@ function App() {
 
   const refreshTasks = useCallback(async () => {
     try {
-      await invoke<Task[]>("recover_interrupted_tasks", { staleAfterSeconds: STALE_TASK_SECONDS });
-      await invoke<Task[]>("sync_pending_analyzed_tasks");
       const nextTasks = await invoke<Task[]>("list_capture_tasks");
-      setTasks(nextTasks);
+      setTasks((currentTasks) => mergeTaskList(currentTasks, nextTasks));
       setQueueError(null);
       setQueueLoadState("ready");
     } catch {
@@ -235,7 +233,35 @@ function App() {
   }, []);
 
   useEffect(() => {
-    void loadTasks();
+    let cancelled = false;
+    const taskUnlisten = listen<Task>("task:updated", (event) => {
+      setTasks((currentTasks) => upsertTask(currentTasks, event.payload));
+      setWorkerError(null);
+      setQueueError(null);
+      setQueueLoadState("ready");
+    });
+    const workerErrorUnlisten = listen<string>("worker:error", (event) => {
+      setWorkerError(readableError(event.payload));
+    });
+
+    void Promise.all([taskUnlisten, workerErrorUnlisten])
+      .then(() => {
+        if (!cancelled) {
+          void loadTasks();
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setQueueError(readableError(error));
+          setQueueLoadState("error");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      void taskUnlisten.then((unlisten) => unlisten()).catch(() => undefined);
+      void workerErrorUnlisten.then((unlisten) => unlisten()).catch(() => undefined);
+    };
   }, [loadTasks]);
 
   const queueRows = useMemo(() => tasks.map(taskToQueueRow), [tasks]);
@@ -248,22 +274,20 @@ function App() {
     [url]
   );
 
-  const hasProcessingTask = useMemo(
-    () => tasks.some((task) => taskMatchesFilter(task.status, "processing")),
-    [tasks]
-  );
-
   useEffect(() => {
-    if (!hasProcessingTask) {
-      return;
-    }
-
     const timer = window.setInterval(() => {
       void refreshTasks();
-    }, 1200);
+    }, 30_000);
+    const handleFocus = () => {
+      void refreshTasks();
+    };
+    window.addEventListener("focus", handleFocus);
 
-    return () => window.clearInterval(timer);
-  }, [hasProcessingTask, refreshTasks]);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [refreshTasks]);
 
   const hideToMenuBar = useCallback(async () => {
     setIsTogglingCompact(true);
@@ -310,6 +334,18 @@ function App() {
 
   const handleRunTask = useCallback(async (id: string) => {
     setRetryingTaskId(id);
+    setTasks((currentTasks) =>
+      currentTasks.map((item) =>
+        item.id === id && item.status === "queued"
+          ? {
+              ...item,
+              status: "reading",
+              error_kind: null,
+              error_message: null
+            }
+          : item
+      )
+    );
     try {
       const updatedTask = await invoke<Task>("run_capture_task", { id });
       setTasks((currentTasks) => upsertTask(currentTasks, updatedTask));
@@ -318,27 +354,23 @@ function App() {
       setQueueError(readableError(error));
     } finally {
       setRetryingTaskId(null);
-      await refreshTasks();
     }
-  }, [refreshTasks]);
+  }, []);
 
   const handleRetryTask = useCallback(async (id: string) => {
-    const task = tasks.find((item) => item.id === id);
     setRetryingTaskId(id);
-    if (task) {
-      setTasks((currentTasks) =>
-        currentTasks.map((item) =>
-          item.id === id
-            ? {
-                ...item,
-                status: item.analysis_json ? "syncing" : "reading",
-                error_kind: null,
-                error_message: null
-              }
-            : item
-        )
-      );
-    }
+    setTasks((currentTasks) =>
+      currentTasks.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              status: item.analysis_json ? "analyzed" : "queued",
+              error_kind: null,
+              error_message: null
+            }
+          : item
+      )
+    );
 
     try {
       const updatedTask = await invoke<Task>("retry_capture_task", { id });
@@ -348,9 +380,8 @@ function App() {
       setQueueError(readableError(error));
     } finally {
       setRetryingTaskId(null);
-      await refreshTasks();
     }
-  }, [refreshTasks, tasks]);
+  }, []);
 
   const handleSearchClick = () => {
     const shouldOpen = activeNav !== "queue" || !searchOpen;
@@ -380,7 +411,6 @@ function App() {
       setNote("");
       setTasks((currentTasks) => upsertTask(currentTasks, createdTask));
       setActiveNav("queue");
-      void handleRunTask(createdTask.id);
     } catch (error) {
       setCaptureError(readableError(error));
     } finally {
@@ -445,9 +475,9 @@ function App() {
         shrinkDisabled={isTogglingCompact}
       />
       <section className="app-content">
-        {setupError && (
+        {(setupError || workerError) && (
           <div className="app-error-banner">
-            {setupError}
+            {setupError ?? workerError}
           </div>
         )}
         {activeNav === "queue" && (
@@ -461,6 +491,7 @@ function App() {
             searchOpen={searchOpen}
             searchTerm={searchTerm}
             onSearchTermChange={setSearchTerm}
+            onRunTask={handleRunTask}
             onRetryTask={handleRetryTask}
             retryingTaskId={retryingTaskId}
           />

@@ -4,9 +4,9 @@ Last updated: 2026-07-02
 
 ## Current Snapshot
 
-状态：PASS / C0 CI gate and codex review passed
+状态：PASS / Slice A split Claude gates passed, frontend P2s fixed
 
-历史上多个队列/worker/provider/reader/Notion 切片的 Claude CLI 只读 review gate 曾 timeout 或 blocked。`Analyzed -> Notion` 自动同步 bugfix 已完成 Claude gate：无 P0/P1，1 个 P2（批量补同步遇到极低概率 DB 错误会提前退出，后续 refresh 可恢复），Gate = PASS。桌面 QA 隔离修复已完成 Claude gate：最终 Gate = PASS。Slice 2 Agent-Reach 平台能力矩阵已完成 Claude gate：无 P0/P1，Gate = PASS。Slice 3 模板注册/模板选择地基本地验证与桌面 QA 均通过，但 Claude CLI 只读 review 两次超时无输出，最终由 2026-07-02 的 Slice 1-3 单 commit 落盘。C0 CI 验收防线已按报告进入 PR：codex 只读 review fallback 对 C0 workflow diff 返回 Gate = PASS；GitHub Actions 真实 runner 通过，且同一 commit rerun 3 次均通过。
+历史上多个队列/worker/provider/reader/Notion 切片的 Claude CLI 只读 review gate 曾 timeout 或 blocked。`Analyzed -> Notion` 自动同步 bugfix 已完成 Claude gate：无 P0/P1，1 个 P2（批量补同步遇到极低概率 DB 错误会提前退出，后续 refresh 可恢复），Gate = PASS。桌面 QA 隔离修复已完成 Claude gate：最终 Gate = PASS。Slice 2 Agent-Reach 平台能力矩阵已完成 Claude gate：无 P0/P1，Gate = PASS。Slice 3 模板注册/模板选择地基本地验证与桌面 QA 均通过，但 Claude CLI 只读 review 两次超时无输出，最终由 2026-07-02 的 Slice 1-3 单 commit 落盘。C0 CI 验收防线已按报告进入 PR：codex 只读 review fallback 对 C0 workflow diff 返回 Gate = PASS；GitHub Actions 真实 runner 通过，且同一 commit rerun 3 次均通过。Slice A worker queue 已完成本地验证和 QA app smoke；完整 packet 多次 timeout 后拆成 backend/frontend 小包，backend Gate PASS，frontend Gate PASS，frontend 两个 P2 已修。
 
 ## Gate Rules
 
@@ -56,3 +56,9 @@ Last updated: 2026-07-02
 - Review attempt 18：按 C0 报告要求执行 codex 只读 review fallback，命令为 `codex exec -s read-only "<C0 workflow diff review prompt>"`，审查范围限定到 `0a81607` 的 `.github/workflows/ci.yml`。结果：Findings 无 P0/P1/P2，Gate = PASS。残余风险：真实 GitHub Actions runner 上仍需确认 `pull_request` 场景下 `origin/${{ github.base_ref }}...HEAD` 可稳定运行；`fetch-depth: 0` 已作为正确前置配置。
 - CI run `28573058115` / job `84715065717` 首次失败在 `Check whitespace`，原因是前置 PRD `plans/prds/20260701-1447-reachnote-next-phase-platform-template-destinations-onboarding-shortcuts.prd.md` 第 3-6 行 Markdown 硬换行尾随空格。已提交 `b513574 修复 PRD 空白检查问题`，删除 4 行尾随空格，并本地复跑 `git diff --check origin/main...HEAD` 通过。
 - CI run `28573828152` 在 commit `ccd0a75` 上通过：初始 job `84717527015` success；同一 commit 三次 rerun 均通过，job 分别为 `84718456350`、`84719230579`、`84719818249`。C0 的 GitHub Actions runner 验收与 flake 检查均完成。
+- C0 已按用户授权 fast-forward merge 到 `main` 并推送，`origin/main` 前进到 `ce42abd`；随后创建 `codex/slice-a-worker` 分支开始 Slice A。
+- Review attempt 19：针对 Slice A backend worker / event-driven queue，packet `/tmp/reachnote-slice-a-review-packet.md` 包含目标、验证矩阵、worker/store/lib/frontend 摘录和 QA app smoke。命令：`/opt/homebrew/bin/timeout 240 claude -p --output-format text --disable-slash-commands --safe-mode --model sonnet --tools "" --no-session-persistence "$(cat /tmp/reachnote-slice-a-review-packet.md)"`。结果：退出码 124，240 秒超时，无输出，不能作为 PASS。
+- Codex fallback attempt：`codex exec -s read-only` 读取同一 packet 后因 websocket/TLS/HTTP fallback 反复断流，手动中止，不能作为 review verdict。当前 gate：Blocked。实现验证已通过 `pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml`、`git diff --check` 和 `ReachNote QA.app` Computer Use smoke，但没有可采信 Claude PASS。
+- Review attempt 20：同一 Slice A 使用 ultra-compact packet `/tmp/reachnote-slice-a-review-ultra.md`，仍 240 秒 timeout 无输出；backend-only packet `/tmp/reachnote-slice-a-backend-review.md` 180 秒 timeout。Claude CLI 健康检查 `Return exactly: OK` 能返回，说明需要进一步缩小 packet。
+- Review attempt 21：critical backend packet `/tmp/reachnote-slice-a-critical-backend.md` 约 19KB，Claude 返回 Gate = PASS。Finding：标为 P1 但同时注明 no blocker 的跨系统 crash window（Notion `create_page` 成功后、SQLite 写 `notion_page_id` 前进程崩溃可能产生孤儿/重复 page）；该风险已被 Slice A 审查报告显式接受为 residual crash window，不作为阻塞修复。P2：`claim_next_finalization_task` 的 `Syncing -> Syncing` self-loop 缺少注释；invalid analyzed fail 可能掩盖上游 bug。
+- Review attempt 22：critical frontend packet `/tmp/reachnote-slice-a-critical-frontend.md` 约 10KB，Claude 返回 Gate = PASS，无 P0/P1。P2：`handleRetryTask` 闭包依赖 `tasks`、`handleRunTask` 无乐观状态。已修复：`handleRetryTask` 改为纯 functional state update，`handleRunTask` 对 queued 行乐观写 `reading`。修复后 `pnpm typecheck`、`pnpm build`、`git diff --check` 通过；后续 tiny re-review 受 Claude timeout，无新增 findings。

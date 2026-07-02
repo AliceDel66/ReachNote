@@ -3,10 +3,12 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{env, sync::Arc};
 
-use reachnote_core::analysis::{parse_analysis_result, AnalysisRequest, ProviderId};
-use reachnote_core::notion::{
-    build_notion_properties, NotionSettings, NotionSettingsView, NOTION_API_VERSION,
-};
+#[cfg(test)]
+use reachnote_core::analysis::AnalysisRequest;
+use reachnote_core::analysis::ProviderId;
+#[cfg(test)]
+use reachnote_core::notion::build_notion_properties;
+use reachnote_core::notion::{NotionSettings, NotionSettingsView, NOTION_API_VERSION};
 use reachnote_core::platform::{normalize_doctor_output, SourcePlatformStatus};
 use reachnote_core::task::{validate_article_url, ErrorKind, Task, TaskStatus};
 use reachnote_core::template::{
@@ -15,7 +17,7 @@ use reachnote_core::template::{
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use wait_timeout::ChildExt;
 
@@ -23,9 +25,12 @@ mod notion;
 mod provider;
 mod reader;
 mod store;
+mod worker;
 
 use notion::NotionClient;
+#[cfg(test)]
 use provider::ProviderRunner;
+#[cfg(test)]
 use reader::AgentReachWebReader;
 use store::{AppSettings, TaskStore};
 
@@ -68,6 +73,7 @@ fn shell_status() -> reachnote_core::ShellStatus {
 #[tauri::command]
 fn create_capture_task(
     store: State<'_, Arc<TaskStore>>,
+    worker: State<'_, worker::WorkerNotifier>,
     url: String,
     note: Option<String>,
     provider_id: Option<String>,
@@ -121,6 +127,7 @@ fn create_capture_task(
     store
         .insert_task(&task)
         .map_err(|error| command_error(error.kind, &error.message))?;
+    worker.notify();
 
     Ok(task)
 }
@@ -140,15 +147,27 @@ fn list_capture_tasks(store: State<'_, Arc<TaskStore>>) -> Result<Vec<Task>, Str
 #[tauri::command]
 fn recover_interrupted_tasks(
     store: State<'_, Arc<TaskStore>>,
+    app_handle: tauri::AppHandle,
     stale_after_seconds: Option<u64>,
 ) -> Result<Vec<Task>, String> {
     let stale_after_seconds = stale_after_seconds
         .filter(|value| *value > 0)
-        .unwrap_or_else(default_stale_task_seconds);
-    let now = current_unix_timestamp();
-    store
-        .recover_stale_processing_tasks(&now, stale_after_seconds)
-        .map_err(|error| command_error(error.kind, &error.message))
+        .unwrap_or_else(worker::effective_stale_task_seconds)
+        .max(worker::effective_stale_task_seconds());
+    let emit = |task: &Task| {
+        app_handle
+            .emit("task:updated", task.clone())
+            .map_err(|error| error.to_string())
+    };
+    let recovered = store
+        .recover_stale_processing_tasks(&current_unix_timestamp(), stale_after_seconds)
+        .map_err(|error| command_error(error.kind, &error.message))?;
+    for task in &recovered {
+        if let Err(error) = emit(task) {
+            eprintln!("[worker] emit task:updated failed for {}: {error}", task.id);
+        }
+    }
+    Ok(recovered)
 }
 
 #[tauri::command]
@@ -296,254 +315,78 @@ async fn test_notion_connection(store: State<'_, Arc<TaskStore>>) -> Result<Stri
 }
 
 #[tauri::command]
-async fn run_capture_task(store: State<'_, Arc<TaskStore>>, id: String) -> Result<Task, String> {
-    // 读网页 + 调 AI CLI 最长可达 120s。放进 spawn_blocking：async 命令不占用 UI 主线程，
-    // 前端轮询 list_capture_tasks 期间可实时读到 reading/analyzing 状态（store 在长操作间隙
-    // 释放锁）。分析完成后的 Notion 同步也在同一个后端链路里兜底，避免前端 reload
-    // 导致任务停在 Analyzed。
+async fn run_capture_task(
+    store: State<'_, Arc<TaskStore>>,
+    app_handle: tauri::AppHandle,
+    id: String,
+) -> Result<Task, String> {
+    // “立即处理”是队列 worker 的 inline fallback：只有 queued -> reading 的 CAS claim 成功
+    // 才会执行；如果后台 worker 已经拿到任务，直接返回当前任务状态，不把竞争视为错误。
     let store = Arc::clone(store.inner());
-    tauri::async_runtime::spawn_blocking(move || run_and_sync_capture_task_blocking(&store, id))
-        .await
-        .map_err(|error| format!("采集任务执行失败: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        let emit = |task: &Task| {
+            app_handle
+                .emit("task:updated", task.clone())
+                .map_err(|error| error.to_string())
+        };
+        worker::run_capture_task_inline(&store, id, &emit)
+    })
+    .await
+    .map_err(|error| format!("采集任务执行失败: {error}"))?
 }
 
 #[tauri::command]
-async fn retry_capture_task(store: State<'_, Arc<TaskStore>>, id: String) -> Result<Task, String> {
+async fn retry_capture_task(
+    store: State<'_, Arc<TaskStore>>,
+    worker_notifier: State<'_, worker::WorkerNotifier>,
+    id: String,
+) -> Result<Task, String> {
     let store = Arc::clone(store.inner());
-    tauri::async_runtime::spawn_blocking(move || retry_capture_task_blocking(&store, id))
-        .await
-        .map_err(|error| format!("重试任务执行失败: {error}"))?
+    let updated = tauri::async_runtime::spawn_blocking(move || {
+        worker::retry_capture_task_blocking(&store, id)
+    })
+    .await
+    .map_err(|error| format!("重试任务执行失败: {error}"))??;
+    worker_notifier.notify();
+    Ok(updated)
 }
 
 #[tauri::command]
 async fn sync_pending_analyzed_tasks(
     store: State<'_, Arc<TaskStore>>,
+    app_handle: tauri::AppHandle,
 ) -> Result<Vec<Task>, String> {
     let store = Arc::clone(store.inner());
-    tauri::async_runtime::spawn_blocking(move || sync_pending_analyzed_tasks_blocking(&store))
-        .await
-        .map_err(|error| format!("补同步任务执行失败: {error}"))?
-}
-
-fn run_capture_task_blocking(store: &TaskStore, id: String) -> Result<Task, String> {
-    let mut task = store
-        .get_task(&id)
-        .map_err(|error| command_error(error.kind, &error.message))?
-        .ok_or_else(|| {
-            command_error(ErrorKind::ReadFailed, &format!("找不到本地队列任务: {id}"))
-        })?;
-
-    task.status = TaskStatus::Reading;
-    task.error_kind = None;
-    task.error_message = None;
-    task.updated_at = current_unix_timestamp();
-    store
-        .update_task(&task)
-        .map_err(|error| command_error(error.kind, &error.message))?;
-
-    let content = match AgentReachWebReader::from_env().read_article(&task.url) {
-        Ok(content) => content,
-        Err(error) => {
-            task.status = TaskStatus::Failed;
-            task.error_kind = Some(error.kind);
-            task.error_message = Some(error.message);
-            task.updated_at = current_unix_timestamp();
-            store
-                .update_task(&task)
-                .map_err(|error| command_error(error.kind, &error.message))?;
-            return Ok(task);
-        }
-    };
-
-    task.status = TaskStatus::Analyzing;
-    task.updated_at = current_unix_timestamp();
-    store
-        .update_task(&task)
-        .map_err(|error| command_error(error.kind, &error.message))?;
-
-    let provider_id = ProviderId::from_str(&task.provider_id).ok_or_else(|| {
-        command_error(
-            ErrorKind::SchemaMismatch,
-            &format!("未知 AI provider: {}", task.provider_id),
-        )
-    })?;
-    let request = AnalysisRequest {
-        url: task.url.clone(),
-        source_type: task.source_type.clone(),
-        source_domain: task.source_domain.clone(),
-        template_id: task.template_id.clone(),
-        note: task.note.clone(),
-        content_text: Some(content.text),
-        content_reader: Some(content.reader),
-    };
-
-    match ProviderRunner::from_env().analyze(provider_id, &request) {
-        Ok(analysis) => {
-            task.status = TaskStatus::Analyzed;
-            task.title = Some(analysis.title.clone());
-            task.score = Some(analysis.score);
-            task.model = Some(analysis.model.clone());
-            task.analysis_json = Some(serde_json::to_string(&analysis).map_err(|error| {
-                command_error(
-                    ErrorKind::ParseFailed,
-                    &format!("结构化研究卡序列化失败: {error}"),
-                )
-            })?);
-            task.error_kind = None;
-            task.error_message = None;
-        }
-        Err(error) => {
-            task.status = TaskStatus::Failed;
-            task.error_kind = Some(error.kind);
-            task.error_message = Some(error.message);
-        }
-    }
-
-    task.updated_at = current_unix_timestamp();
-    store
-        .update_task(&task)
-        .map_err(|error| command_error(error.kind, &error.message))?;
-
-    Ok(task)
-}
-
-fn run_and_sync_capture_task_blocking(store: &TaskStore, id: String) -> Result<Task, String> {
-    let updated_task = run_capture_task_blocking(store, id.clone())?;
-    if updated_task.status == TaskStatus::Analyzed {
-        sync_capture_task_blocking(store, id)
-    } else {
-        Ok(updated_task)
-    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let emit = |task: &Task| {
+            app_handle
+                .emit("task:updated", task.clone())
+                .map_err(|error| error.to_string())
+        };
+        worker::sync_pending_analyzed_tasks_blocking(&store, &emit)
+    })
+    .await
+    .map_err(|error| format!("补同步任务执行失败: {error}"))?
 }
 
 #[tauri::command]
-async fn sync_capture_task(store: State<'_, Arc<TaskStore>>, id: String) -> Result<Task, String> {
+async fn sync_capture_task(
+    store: State<'_, Arc<TaskStore>>,
+    app_handle: tauri::AppHandle,
+    id: String,
+) -> Result<Task, String> {
     // Notion 同步走阻塞 HTTP，同样放进 spawn_blocking，避免冻结 UI 主线程。
     let store = Arc::clone(store.inner());
-    tauri::async_runtime::spawn_blocking(move || sync_capture_task_blocking(&store, id))
-        .await
-        .map_err(|error| format!("同步任务执行失败: {error}"))?
-}
-
-fn sync_capture_task_blocking(store: &TaskStore, id: String) -> Result<Task, String> {
-    let mut task = store
-        .get_task(&id)
-        .map_err(|error| command_error(error.kind, &error.message))?
-        .ok_or_else(|| {
-            command_error(ErrorKind::ReadFailed, &format!("找不到本地队列任务: {id}"))
-        })?;
-
-    if !task_can_sync(&task) {
-        return Err(command_error(
-            ErrorKind::SchemaMismatch,
-            "只能同步已分析任务；分析失败或尚未生成研究卡的任务需要先重试分析",
-        ));
-    }
-
-    let analysis_json = match task.analysis_json.as_deref() {
-        Some(value) => value,
-        None => {
-            return fail_sync_task(
-                store,
-                task,
-                ErrorKind::ParseFailed,
-                "任务缺少结构化研究卡，无法同步到 Notion".to_string(),
-            );
-        }
-    };
-
-    let analysis = match parse_analysis_result(analysis_json) {
-        Ok(analysis) => analysis,
-        Err(error) => return fail_sync_task(store, task, error.kind, error.message),
-    };
-
-    task.status = TaskStatus::Syncing;
-    task.error_kind = None;
-    task.error_message = None;
-    task.updated_at = current_unix_timestamp();
-    store
-        .update_task(&task)
-        .map_err(|error| command_error(error.kind, &error.message))?;
-
-    let captured_at_iso = match unix_seconds_to_rfc3339(&task.created_at) {
-        Ok(value) => value,
-        Err(error) => return fail_sync_task(store, task, ErrorKind::ParseFailed, error),
-    };
-    let synced_duration = current_duration();
-    let synced_at_unix = synced_duration.as_secs().to_string();
-    let synced_at_iso = match duration_to_rfc3339(synced_duration) {
-        Ok(value) => value,
-        Err(error) => return fail_sync_task(store, task, ErrorKind::ParseFailed, error),
-    };
-
-    let properties = build_notion_properties(&task, &analysis, &captured_at_iso, &synced_at_iso);
-    let settings = match store.get_notion_settings() {
-        Ok(Some(settings)) => settings,
-        Ok(None) => {
-            return fail_sync_task(
-                store,
-                task,
-                ErrorKind::NotionUnauthorized,
-                "尚未配置 Notion 连接，请先在设置页保存 Integration Token 和 Database ID"
-                    .to_string(),
-            );
-        }
-        Err(error) => return Err(command_error(error.kind, &error.message)),
-    };
-    match NotionClient::from_settings(settings).and_then(|client| client.create_page(properties)) {
-        Ok(page_id) => {
-            task.status = TaskStatus::Synced;
-            task.notion_page_id = Some(page_id);
-            task.synced_at = Some(synced_at_unix);
-            task.error_kind = None;
-            task.error_message = None;
-        }
-        Err(error) => {
-            return fail_sync_task(store, task, error.kind, error.message);
-        }
-    }
-
-    task.updated_at = current_unix_timestamp();
-    store
-        .update_task(&task)
-        .map_err(|error| command_error(error.kind, &error.message))?;
-
-    Ok(task)
-}
-
-fn retry_capture_task_blocking(store: &TaskStore, id: String) -> Result<Task, String> {
-    let task = store
-        .get_task(&id)
-        .map_err(|error| command_error(error.kind, &error.message))?
-        .ok_or_else(|| {
-            command_error(ErrorKind::ReadFailed, &format!("找不到本地队列任务: {id}"))
-        })?;
-
-    match task.status {
-        TaskStatus::Queued => run_and_sync_capture_task_blocking(store, id),
-        TaskStatus::Failed if task.analysis_json.is_none() => {
-            run_and_sync_capture_task_blocking(store, id)
-        }
-        TaskStatus::Analyzed | TaskStatus::Failed => sync_capture_task_blocking(store, id),
-        TaskStatus::Synced => Ok(task),
-        TaskStatus::Reading | TaskStatus::Analyzing | TaskStatus::Syncing => Err(command_error(
-            ErrorKind::ReadFailed,
-            "任务仍在处理中；长时间无变化时会自动恢复为失败后可重试",
-        )),
-    }
-}
-
-fn sync_pending_analyzed_tasks_blocking(store: &TaskStore) -> Result<Vec<Task>, String> {
-    let tasks = store
-        .list_pending_sync_tasks()
-        .map_err(|error| command_error(error.kind, &error.message))?;
-    let mut updated_tasks = Vec::with_capacity(tasks.len());
-
-    for task in tasks {
-        updated_tasks.push(sync_capture_task_blocking(store, task.id)?);
-    }
-
-    Ok(updated_tasks)
+    tauri::async_runtime::spawn_blocking(move || {
+        let emit = |task: &Task| {
+            app_handle
+                .emit("task:updated", task.clone())
+                .map_err(|error| error.to_string())
+        };
+        worker::sync_capture_task_inline(&store, id, &emit)
+    })
+    .await
+    .map_err(|error| format!("同步任务执行失败: {error}"))?
 }
 
 #[tauri::command]
@@ -634,8 +477,12 @@ pub fn run() {
             let store = TaskStore::open(&db_path)?;
             // Arc 注入：阻塞命令要把 store 克隆进 spawn_blocking 闭包（'static + Send），
             // 同步命令仍可经 State -> Arc -> TaskStore 自动解引用调用。
-            app.manage(Arc::new(store));
+            let store = Arc::new(store);
+            let (worker_notifier, worker_receiver) = worker::channel();
+            app.manage(Arc::clone(&store));
+            app.manage(worker_notifier);
             setup_reachnote_tray(app)?;
+            worker::start_worker(Arc::clone(&store), worker_receiver, app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -675,7 +522,7 @@ pub fn run() {
     });
 }
 
-fn command_error(kind: ErrorKind, message: &str) -> String {
+pub(crate) fn command_error(kind: ErrorKind, message: &str) -> String {
     format!("{message} ({})", kind.as_str())
 }
 
@@ -689,20 +536,6 @@ fn require_notion_settings(store: &TaskStore) -> Result<NotionSettings, String> 
                 "尚未配置 Notion 连接，请先在设置页保存 Integration Token 和 Database ID",
             )
         })
-}
-
-fn task_can_sync(task: &Task) -> bool {
-    task.status == TaskStatus::Analyzed
-        || task.status == TaskStatus::Syncing
-        || (task.status == TaskStatus::Failed && task.analysis_json.is_some())
-}
-
-fn default_stale_task_seconds() -> u64 {
-    env::var("REACHNOTE_STALE_TASK_SECS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(300)
 }
 
 fn default_doctor_timeout() -> Duration {
@@ -1005,22 +838,6 @@ fn executable_path(path: &Path) -> Option<PathBuf> {
     path.is_file().then(|| path.to_path_buf())
 }
 
-fn fail_sync_task(
-    store: &TaskStore,
-    mut task: Task,
-    kind: ErrorKind,
-    message: String,
-) -> Result<Task, String> {
-    task.status = TaskStatus::Failed;
-    task.error_kind = Some(kind);
-    task.error_message = Some(message);
-    task.updated_at = current_unix_timestamp();
-    store
-        .update_task(&task)
-        .map_err(|error| command_error(error.kind, &error.message))?;
-    Ok(task)
-}
-
 fn create_task_id() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1036,17 +853,17 @@ fn create_task_id() -> String {
     )
 }
 
-fn current_unix_timestamp() -> String {
+pub(crate) fn current_unix_timestamp() -> String {
     current_duration().as_secs().to_string()
 }
 
-fn current_duration() -> Duration {
+pub(crate) fn current_duration() -> Duration {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| Duration::from_secs(0))
 }
 
-fn unix_seconds_to_rfc3339(value: &str) -> Result<String, String> {
+pub(crate) fn unix_seconds_to_rfc3339(value: &str) -> Result<String, String> {
     let seconds = value
         .parse::<i64>()
         .map_err(|error| format!("任务时间戳不是合法 unix 秒，无法写入 Notion date: {error}"))?;
@@ -1056,7 +873,7 @@ fn unix_seconds_to_rfc3339(value: &str) -> Result<String, String> {
         .map_err(|error| format!("无法格式化 Notion date: {error}"))
 }
 
-fn duration_to_rfc3339(duration: Duration) -> Result<String, String> {
+pub(crate) fn duration_to_rfc3339(duration: Duration) -> Result<String, String> {
     OffsetDateTime::from_unix_timestamp(duration.as_secs() as i64)
         .map_err(|error| format!("当前时间超出 Notion date 可写范围: {error}"))?
         .format(&Rfc3339)
@@ -1256,7 +1073,7 @@ exit /b 2
         let task = sample_task("processing", TaskStatus::Analyzing);
         store.insert_task(&task).unwrap();
 
-        let error = retry_capture_task_blocking(&store, task.id.clone()).unwrap_err();
+        let error = worker::retry_capture_task_blocking(&store, task.id.clone()).unwrap_err();
         assert!(error.contains("任务仍在处理中"));
         let loaded = store.get_task(&task.id).unwrap().unwrap();
         assert_eq!(loaded.status, TaskStatus::Analyzing);
@@ -1276,15 +1093,11 @@ exit /b 2
         task.error_message = Some("上一轮同步失败".to_string());
         store.insert_task(&task).unwrap();
 
-        let updated = retry_capture_task_blocking(&store, task.id.clone()).unwrap();
-        assert_eq!(updated.status, TaskStatus::Failed);
-        assert_eq!(updated.error_kind, Some(ErrorKind::NotionUnauthorized));
+        let updated = worker::retry_capture_task_blocking(&store, task.id.clone()).unwrap();
+        assert_eq!(updated.status, TaskStatus::Analyzed);
+        assert_eq!(updated.error_kind, None);
         assert!(updated.analysis_json.is_some());
-        assert!(updated
-            .error_message
-            .as_deref()
-            .unwrap()
-            .contains("尚未配置 Notion 连接"));
+        assert_eq!(updated.error_message, None);
 
         let _ = fs::remove_file(db_path);
     }
@@ -1309,7 +1122,8 @@ exit /b 2
         store.insert_task(&already_synced).unwrap();
         store.insert_task(&queued).unwrap();
 
-        let updated = sync_pending_analyzed_tasks_blocking(&store).unwrap();
+        let noop_emit = |_task: &Task| Ok(());
+        let updated = worker::sync_pending_analyzed_tasks_blocking(&store, &noop_emit).unwrap();
         assert_eq!(updated.len(), 1);
         assert_eq!(updated[0].id, pending.id);
         assert_eq!(updated[0].status, TaskStatus::Failed);

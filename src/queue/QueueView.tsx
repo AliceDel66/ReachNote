@@ -13,6 +13,7 @@ interface QueueViewProps {
   searchOpen: boolean;
   searchTerm: string;
   onSearchTermChange: (term: string) => void;
+  onRunTask: (id: string) => void;
   onRetryTask: (id: string) => void;
   retryingTaskId: string | null;
 }
@@ -27,6 +28,7 @@ export function QueueView({
   searchOpen,
   searchTerm,
   onSearchTermChange,
+  onRunTask,
   onRetryTask,
   retryingTaskId
 }: QueueViewProps) {
@@ -112,6 +114,16 @@ export function QueueView({
                   onClick={() => onRetryTask(item.id)}
                 >
                   {retryingTaskId === item.id ? "重试中" : "重试"}
+                </button>
+              )}
+              {item.status === "queued" && (
+                <button
+                  className="row-action"
+                  type="button"
+                  disabled={retryingTaskId === item.id}
+                  onClick={() => onRunTask(item.id)}
+                >
+                  {retryingTaskId === item.id ? "处理中" : "立即处理"}
                 </button>
               )}
             </span>
