@@ -1,12 +1,12 @@
-import { templateLabel } from "./constants";
-import type { QueueFilter, QueueRow, Task, TaskStatus } from "./types";
+import { DEFAULT_TEMPLATE_ID, TEMPLATE_PRESENTATION } from "./constants";
+import type { PlatformRule, QueueFilter, QueueRow, Task, TaskStatus, TemplateId, TemplateItem, TemplateRegistry } from "./types";
 
-export function taskToQueueRow(task: Task): QueueRow {
+export function taskToQueueRow(task: Task, templateRegistry: TemplateRegistry): QueueRow {
   return {
     id: task.id,
     title: task.title ?? task.url,
     source: task.source_domain ?? task.source_type,
-    templateLabel: templateLabel(task.template_id),
+    templateLabel: templateLabel(task.template_id, templateRegistry),
     status: task.status,
     time: formatTimestamp(task.created_at),
     score: task.score,
@@ -15,6 +15,55 @@ export function taskToQueueRow(task: Task): QueueRow {
     errorMessage: task.error_message,
     notionPageId: task.notion_page_id
   };
+}
+
+export function templateItemsFromRegistry(templateRegistry: TemplateRegistry): TemplateItem[] {
+  return templateRegistry.templates.map((template) => {
+    const presentation = TEMPLATE_PRESENTATION[template.id] ?? TEMPLATE_PRESENTATION[DEFAULT_TEMPLATE_ID];
+    return {
+      id: template.id,
+      name: template.name,
+      description: template.description,
+      compatible_source_types: template.compatible_source_types,
+      prompt_profile: template.prompt_profile,
+      enabled: template.enabled,
+      icon: presentation.icon,
+      chips: presentation.chips
+    };
+  });
+}
+
+export function isTemplateId(value: string | null | undefined, templateRegistry: TemplateRegistry): value is TemplateId {
+  return Boolean(value && templateRegistry.templates.some((template) => template.id === value));
+}
+
+export function normalizeTemplateId(
+  value: string | null | undefined,
+  templateRegistry: TemplateRegistry
+): TemplateId {
+  if (isTemplateId(value, templateRegistry)) {
+    return value;
+  }
+
+  const alias = templateRegistry.template_aliases.find((item) => item.alias === value?.trim());
+  if (isTemplateId(alias?.template_id, templateRegistry)) {
+    return alias.template_id;
+  }
+
+  return DEFAULT_TEMPLATE_ID;
+}
+
+export function templateLabel(templateId: string | null | undefined, templateRegistry: TemplateRegistry): string {
+  const normalizedTemplateId = normalizeTemplateId(templateId, templateRegistry);
+  return templateRegistry.templates.find((template) => template.id === normalizedTemplateId)?.name ?? "网页文章笔记";
+}
+
+export function templateForSourcePlatformKey(
+  key: string | null | undefined,
+  templateRegistry: TemplateRegistry
+): TemplateId {
+  const templateId = templateRegistry.platform_template_mappings.find((mapping) => mapping.platform_key === key)?.template_id;
+  return normalizeTemplateId(templateId, templateRegistry);
 }
 
 export function upsertTask(tasks: Task[], nextTask: Task): Task[] {
@@ -131,7 +180,7 @@ export function isValidArticleUrl(value: string): boolean {
   return Boolean(host) && host.includes(".") && !host.includes(" ");
 }
 
-export function sourcePlatformKeyForUrl(value: string): string | null {
+export function sourcePlatformKeyForUrl(value: string, platformRules: PlatformRule[]): string | null {
   if (!isValidArticleUrl(value)) {
     return null;
   }
@@ -144,47 +193,31 @@ export function sourcePlatformKeyForUrl(value: string): string | null {
   }
 
   const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
-  if (host === "github.com") {
-    return "github";
+  const path = `${parsed.pathname}${parsed.search}${parsed.hash}`.toLowerCase();
+  const exactMatch = platformRules.find((rule) => rule.exact_hosts.some((exactHost) => exactHost === host));
+  if (exactMatch) {
+    return exactMatch.platform_key;
   }
-  if (host === "youtu.be" || host.endsWith("youtube.com")) {
-    return "youtube";
+
+  const suffixMatch = platformRules.find((rule) =>
+    rule.host_suffixes.some((suffix) => hostMatchesSuffix(host, suffix))
+  );
+  if (suffixMatch) {
+    return suffixMatch.platform_key;
   }
-  if (host === "twitter.com" || host === "x.com") {
-    return "twitter";
-  }
-  if (host.endsWith("reddit.com")) {
-    return "reddit";
-  }
-  if (host.endsWith("facebook.com") || host === "fb.com") {
-    return "facebook";
-  }
-  if (host.endsWith("instagram.com")) {
-    return "instagram";
-  }
-  if (host.endsWith("bilibili.com") || host === "b23.tv") {
-    return "bilibili";
-  }
-  if (host.endsWith("xiaohongshu.com") || host === "xhslink.com") {
-    return "xiaohongshu";
-  }
-  if (host.endsWith("linkedin.com")) {
-    return "linkedin";
-  }
-  if (host.endsWith("xiaoyuzhoufm.com")) {
-    return "xiaoyuzhou";
-  }
-  if (host === "v2ex.com") {
-    return "v2ex";
-  }
-  if (host.endsWith("xueqiu.com")) {
-    return "xueqiu";
-  }
-  if (parsed.pathname.toLowerCase().includes("rss") || parsed.pathname.toLowerCase().includes("feed")) {
-    return "rss";
+
+  const pathMatch = platformRules.find((rule) =>
+    rule.path_keywords.some((keyword) => path.includes(keyword.toLowerCase()))
+  );
+  if (pathMatch) {
+    return pathMatch.platform_key;
   }
 
   return "web";
+}
+
+function hostMatchesSuffix(host: string, suffix: string): boolean {
+  return host === suffix || host.endsWith(`.${suffix}`);
 }
 
 export function sourcePlatformFallbackName(key: string): string {

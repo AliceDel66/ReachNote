@@ -1,15 +1,15 @@
 import { BadgeInfo, FileText, Github, Play, Rss } from "lucide-react";
 
-import { TEMPLATES } from "../constants";
 import type { TemplateId, TemplateItem } from "../types";
 
 interface TemplatesViewProps {
   selectedTemplateId: TemplateId;
   defaultTemplateId: TemplateId;
+  templates: TemplateItem[];
   onTemplateChange: (templateId: TemplateId) => void;
 }
 
-export function TemplatesView({ selectedTemplateId, defaultTemplateId, onTemplateChange }: TemplatesViewProps) {
+export function TemplatesView({ selectedTemplateId, defaultTemplateId, templates, onTemplateChange }: TemplatesViewProps) {
   return (
     <div className="templates-screen">
       <div className="page-heading">
@@ -17,13 +17,13 @@ export function TemplatesView({ selectedTemplateId, defaultTemplateId, onTemplat
         <p>系统模板已注册，可选择默认模板；暂不支持自定义编辑。</p>
       </div>
       <div className="template-grid">
-        {TEMPLATES.map((item) => (
+        {templates.map((item) => (
           <TemplateCard
             defaultTemplateId={defaultTemplateId}
             isSelected={selectedTemplateId === item.id}
             item={item}
             key={item.id}
-            onSelect={() => onTemplateChange(item.id)}
+            onSelect={() => onTemplateChange(item.id as TemplateId)}
           />
         ))}
       </div>
@@ -55,9 +55,9 @@ function TemplateCard({
         {item.icon === "rss" && <Rss size={52} />}
       </div>
       <div className="template-copy">
-        <h2>{item.title}</h2>
+        <h2>{item.name}</h2>
         <p>{item.description}</p>
-        <p className="template-profile">{item.promptProfile}</p>
+        <p className="template-profile">{item.prompt_profile}</p>
         <div className="template-tags">
           {item.chips.map((chip) => (
             <span key={chip}>{chip}</span>
@@ -65,10 +65,10 @@ function TemplateCard({
         </div>
       </div>
       <div className="template-actions">
-        <span className={`template-state ${item.state === "preview" ? "preview" : ""}`}>
-          {defaultTemplateId === item.id ? "默认" : item.state === "preview" ? "可用" : "计划中"}
+        <span className={`template-state ${item.enabled ? "preview" : ""}`}>
+          {defaultTemplateId === item.id ? "默认" : item.enabled ? "可用" : "计划中"}
         </span>
-        <button type="button" className="template-select" disabled={defaultTemplateId === item.id} onClick={onSelect}>
+        <button type="button" className="template-select" disabled={!item.enabled || defaultTemplateId === item.id} onClick={onSelect}>
           {defaultTemplateId === item.id ? "已设默认" : "设为默认"}
         </button>
       </div>

@@ -4,9 +4,9 @@ Last updated: 2026-07-02
 
 ## Current Snapshot
 
-状态：Done / Slice A backend worker and event-driven queue review-gated
+状态：Done / Slice B template and route single source locally verified
 
-当前仓库已从 PRD-only 推进到可运行桌面壳，并完成本地队列、provider 失败路径、Agent-Reach web / GitHub repo 正文读取、结构化分析成功路径、Notion 最小同步、队列 in-progress 恢复、重试调度、orphan analyzed 补同步、Slice 1 首启动/settings 地基、Slice 2 平台能力矩阵、Slice 3 模板注册/选择地基，以及 Slice A 后端 worker 化。当前启动链路为 `App startup -> get_app_settings + get_environment_status(轻量检测 + 最近平台快照) -> onboarding gate or Queue -> register task:updated/worker:error listeners -> list_capture_tasks`。采集链路为 `Article URL -> selected/default/recommended templateId -> create_capture_task(provider_id, template_id) -> SQLite tasks(template_id/status=Queued) -> notify worker -> worker FIFO CAS claim -> Reading -> AgentReachWebReader(Jina Reader / GitHub API fallback) -> Analyzing -> provider adapter -> Analyzed -> Syncing -> NotionClient -> page_id early write -> Synced finalization or Failed -> task:updated -> Queue observer`。前端不再负责 recover/sync_pending/run 三连轮询，只作为 observer；`recover_interrupted_tasks` / `sync_pending_analyzed_tasks` 仍保留为手动 fallback command。OS keychain、OAuth、真实按平台路由读取和登录态平台抓取仍未接入。
+当前仓库已从 PRD-only 推进到可运行桌面壳，并完成本地队列、provider 失败路径、Agent-Reach web / GitHub repo 正文读取、结构化分析成功路径、Notion 最小同步、队列 in-progress 恢复、重试调度、orphan analyzed 补同步、Slice 1 首启动/settings 地基、Slice 2 平台能力矩阵、Slice 3 模板注册/选择地基、Slice A 后端 worker 化，以及 Slice B 模板/路由单一真源。当前启动链路为 `App startup -> get_app_settings + get_environment_status(轻量检测 + 最近平台快照) + list_templates(TemplateRegistry) -> onboarding gate or Queue -> register task:updated/worker:error listeners -> list_capture_tasks`。采集链路为 `Article URL -> backend platform_rules 推荐 sourcePlatformKey -> backend platform_template_mappings 推荐 templateId -> selected/default/recommended templateId -> create_capture_task(provider_id, template_id) -> SQLite tasks(template_id/status=Queued) -> notify worker -> worker FIFO CAS claim -> Reading -> AgentReachWebReader(Jina Reader / GitHub API fallback) -> Analyzing -> provider adapter -> Analyzed -> Syncing -> NotionClient -> page_id early write -> Synced finalization or Failed -> task:updated -> Queue observer`。前端不再负责 recover/sync_pending/run 三连轮询，也不再维护模板正文、legacy alias 或 URL 域名路由分支；`recover_interrupted_tasks` / `sync_pending_analyzed_tasks` 仍保留为手动 fallback command。OS keychain、OAuth、真实按平台路由读取和登录态平台抓取仍未接入。
 
 最新 PRD：
 
@@ -29,6 +29,7 @@ Last updated: 2026-07-02
 - Slice 2 platform matrix：通过本地命令、Tauri dev 启动和 QA installed smoke。core fixture 单测覆盖真实 doctor JSON 15 平台；Tauri fake doctor 测试覆盖 `REACHNOTE_AGENT_REACH_CMD` 注入和 JSON 异常；QA app 首启动自动写入快照，Settings 手动刷新后快照 count 增加，矩阵显示 15 平台和 ready/needs_install/needs_login 三态；Capture 页 YouTube URL 只读提示显示需安装/暂不支持。QA 数据库最终 tasks=0、notion_settings=0，只保留 source capability snapshots。
 - Slice 3 template registry：通过本地命令和 QA installed smoke。core 测试证明模板 profile 注入 prompt、旧 `article` alias canonical 为 `web_article`；Tauri tests 证明注册模板 ID 可存 task、未知模板被拒、默认模板可存 settings；QA app 中模板页设默认 GitHub 后 DB `app_settings.default_template_id=github_project`，采集公开 GitHub URL 后 DB `tasks.template_id=github_project`，队列新增模板列并在重启后仍显示 `GitHub 项目分析`。该公开 GitHub URL 任务失败在 reader/network，不影响模板持久化验证。
 - Slice A worker queue：通过本地命令和 QA installed smoke。`cargo test --manifest-path src-tauri/Cargo.toml` 52 passed / 1 ignored，覆盖 CAS claim、FIFO、syncing 不重入、worker tick、page_id finalization、Notion 未配置失败一次、invalid analyzed、drain、panic catch。`pnpm typecheck` / `pnpm build` / `cargo test -p reachnote-core` / `cargo check --manifest-path src-tauri/Cargo.toml` / `git diff --check` 均通过。隔离 `ReachNote QA.app` 中公开 example.com 任务从 `读取中` -> `分析中` -> `失败/notion_unauthorized`，DB 保留 `analysis_json`，UI 显示失败原因和 `重试`。
+- Slice B template/route single source：通过本地命令和 QA installed smoke。`list_templates` 返回 backend `TemplateRegistry`；前端 `loadSetup` 同时加载 settings/env/templates，模板页、采集页推荐、队列模板 label 均从 registry 派生。`src/constants.ts` 只保留 UI-only icon/chips；legacy `article` alias、平台路由规则和 platform->template 映射在 Rust 单源维护。验证：`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core` 28 passed、`cargo test --manifest-path src-tauri/Cargo.toml` 52 passed / 1 ignored、`cargo check --manifest-path src-tauri/Cargo.toml`、`git diff --check` 均通过。QA app 验证 GitHub/YouTube/RSS URL 推荐正确，默认 GitHub 模板重启持久化，`video_note` 队列行显示 `视频笔记`。
 
 ## Progress Log
 
@@ -87,6 +88,7 @@ Last updated: 2026-07-02
 - Slice 2 集成：`get_environment_status` 不再同步跑 doctor，只读最近平台快照；`run_agent_reach_doctor` 是唯一 doctor 执行入口。当前矩阵只是能力可见化和后续路由地基，未把 `run_capture_task` 改成按 platform action 路由，也未接 OpenCLI/登录态平台真实抓取。
 - Slice 3 集成：模板选择已经跨前端、Tauri command、SQLite task、core prompt 和队列展示形成闭环；本阶段仍保持 `source_type=article`，只让模板先驱动 prompt intent 和可见 label。后续 source_type/destination adapter 切片可在此基础上迁移，不需要重做模板选择 UI。
 - Slice A 集成：队列生命周期所有自动推进已迁移到单 worker；前端提交只创建 task，状态变化来自 `task:updated` event，30 秒低频列表刷新只作兜底。`Failed + analysis_json + no notion_page_id` 不会被后台无限重试；用户点击重试后通过 CAS reset 唤醒 worker。Claude review gate 已拆分完成：backend Gate PASS；frontend Gate PASS，P2 已修；PR CI 尚待创建后验证。
+- Slice B 集成：模板内容、legacy alias、URL route rules 和 platform->template mapping 已合并为 backend `TemplateRegistry` 一次性下发；前端只保存展示层 metadata 和用户当前选择。匹配优先级 exact host > host suffix > path keyword 在 core 单测覆盖，队列/模板/采集三个 UI 面均使用同一 registry 数据。Claude review gate 待执行；本地和 QA app 验证已完成。
 
 #### Notion 测试前置闭环(2026-07-01)
 

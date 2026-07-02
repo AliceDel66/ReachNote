@@ -12,9 +12,9 @@ import {
 } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 
-import { AI_PROVIDERS, TEMPLATES, templateLabel } from "../constants";
-import type { AiProviderId, PlatformAction, PlatformAvailability, SourcePlatformStatus, TemplateId } from "../types";
-import { sourcePlatformFallbackName, sourcePlatformKeyForUrl } from "../utils";
+import { AI_PROVIDERS } from "../constants";
+import type { AiProviderId, PlatformAction, PlatformAvailability, SourcePlatformStatus, TemplateId, TemplateItem } from "../types";
+import { sourcePlatformFallbackName } from "../utils";
 
 interface CaptureViewProps {
   url: string;
@@ -27,11 +27,13 @@ interface CaptureViewProps {
   selectedProviderId: AiProviderId;
   selectedTemplateId: TemplateId;
   suggestedTemplateId: TemplateId;
+  templates: TemplateItem[];
   onProviderChange: (providerId: AiProviderId) => void;
   onTemplateChange: (templateId: TemplateId) => void;
   onSubmit: () => void;
   onPasteFromClipboard: () => void;
   onOpenSettings: () => void;
+  sourcePlatformKey: string | null;
   sourcePlatforms: SourcePlatformStatus[];
   sourcePlatformsChecked: boolean;
 }
@@ -47,28 +49,30 @@ export function CaptureView({
   selectedProviderId,
   selectedTemplateId,
   suggestedTemplateId,
+  templates,
   onProviderChange,
   onTemplateChange,
   onSubmit,
   onPasteFromClipboard,
   onOpenSettings,
+  sourcePlatformKey,
   sourcePlatforms,
   sourcePlatformsChecked
 }: CaptureViewProps) {
   const hasUrl = url.trim().length > 0;
   const sourceHint = useMemo(() => {
-    const key = sourcePlatformKeyForUrl(url);
-    if (!key) {
+    if (!sourcePlatformKey) {
       return null;
     }
 
-    const platform = sourcePlatforms.find((item) => item.key === key);
+    const platform = sourcePlatforms.find((item) => item.key === sourcePlatformKey);
     return {
-      key,
-      name: platform?.name ?? sourcePlatformFallbackName(key),
+      key: sourcePlatformKey,
+      name: platform?.name ?? sourcePlatformFallbackName(sourcePlatformKey),
       platform
     };
-  }, [sourcePlatforms, url]);
+  }, [sourcePlatformKey, sourcePlatforms]);
+  const suggestedTemplateName = templates.find((template) => template.id === suggestedTemplateId)?.name ?? "网页文章笔记";
 
   return (
     <div className="capture-screen">
@@ -154,14 +158,14 @@ export function CaptureView({
           value={selectedTemplateId}
           onChange={(event) => onTemplateChange(event.currentTarget.value as TemplateId)}
         >
-          {TEMPLATES.map((template) => (
+          {templates.map((template) => (
             <option key={template.id} value={template.id}>
-              {template.title}
+              {template.name}
             </option>
           ))}
         </select>
         <p className="template-suggestion">
-          推荐模板：{templateLabel(suggestedTemplateId)}
+          推荐模板：{suggestedTemplateName}
           {selectedTemplateId !== suggestedTemplateId ? "；当前使用手动选择" : ""}
         </p>
 

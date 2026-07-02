@@ -1,12 +1,12 @@
 # Backend Progress
 
-Last updated: 2026-07-01
+Last updated: 2026-07-02
 
 ## Current Snapshot
 
-状态：Done / Slice 3 template registry backend
+状态：Done / Slice B template and route single source backend
 
-旧 Rust core 与 Tauri command 实现已清空后，当前已恢复 Rust workspace、`reachnote-core` crate、Tauri 2 app shell，并完成本地队列、结构化分析、GitHub repo 真实读取 fallback、Notion 同步地基、队列 in-progress 恢复、已分析任务补同步、Slice 1 app settings、Slice 2 Agent-Reach 平台能力矩阵和 Slice 3 模板注册/选择地基：core 任务领域类型、URL/domain 校验、AnalysisResult JSON 契约、Notion property 映射、`platform::normalize_doctor_output`、`template::BUILT_IN_TEMPLATES`、SQLite `tasks` / `notion_settings` / `app_settings` / `source_capability_snapshots` 表、`create_capture_task` / `list_templates` / `list_capture_tasks` / `recover_interrupted_tasks` / `run_capture_task` / `retry_capture_task` / `sync_pending_analyzed_tasks` / `sync_capture_task` / `get_notion_settings` / `save_notion_settings` / `test_notion_connection` / `get_app_settings` / `save_app_settings` / `get_environment_status` / `run_agent_reach_doctor` Tauri commands。`get_environment_status` 只读取最近平台快照，不同步跑 doctor；doctor 只在 UI 显式刷新或首次 onboarding 自动触发时运行。当前仍没有后台自动调度器、OS keychain 或真实按平台路由读取。
+旧 Rust core 与 Tauri command 实现已清空后，当前已恢复 Rust workspace、`reachnote-core` crate、Tauri 2 app shell，并完成本地队列、结构化分析、GitHub repo 真实读取 fallback、Notion 同步地基、队列 in-progress 恢复、已分析任务补同步、Slice 1 app settings、Slice 2 Agent-Reach 平台能力矩阵、Slice 3 模板注册/选择地基、Slice A 后台 worker 化，以及 Slice B 模板/路由单一真源：core 任务领域类型、URL/domain 校验、AnalysisResult JSON 契约、Notion property 映射、`platform::normalize_doctor_output`、`template::BUILT_IN_TEMPLATES`、`template::TemplateRegistry`、`template::TEMPLATE_ALIASES`、`template::PLATFORM_RULES`、`template::PLATFORM_TEMPLATE_MAPPINGS`、SQLite `tasks` / `notion_settings` / `app_settings` / `source_capability_snapshots` 表、`create_capture_task` / `list_templates` / `list_capture_tasks` / `recover_interrupted_tasks` / `run_capture_task` / `retry_capture_task` / `sync_pending_analyzed_tasks` / `sync_capture_task` / `get_notion_settings` / `save_notion_settings` / `test_notion_connection` / `get_app_settings` / `save_app_settings` / `get_environment_status` / `run_agent_reach_doctor` Tauri commands。`list_templates` 现在一次返回模板、legacy alias、平台路由规则和 platform->template 映射；前端不再维护模板正文或域名路由分支。当前仍没有 OS keychain、OAuth 或真实登录态平台抓取。
 
 ## Changed Files
 
@@ -99,3 +99,6 @@ Last updated: 2026-07-01
 - Slice A review P2 fix：为 `claim_next_finalization_task` 的 `Syncing -> Syncing` crash recovery self-loop 和 `Analyzed + analysis_json NULL` 防御性修复补了代码注释；跨系统 `create_page` 成功但 `notion_page_id` 未落盘的 crash window 是审查报告已接受 residual risk。
 - Slice A tests：`cargo test --manifest-path src-tauri/Cargo.toml` 通过，52 passed / 1 ignored；新增/更新覆盖并发 claim 单赢家、FIFO/status guard、syncing 不重入、page_id finalization、queued orphan worker tick、early-write crash finalization、Notion 未配置失败一次、invalid analyzed parse_failed、multi queued drain、panic catch/continue、retry reset。
 - Slice A 验证：`cargo check --manifest-path src-tauri/Cargo.toml`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo test -p reachnote-core`、`pnpm typecheck`、`pnpm build`、`git diff --check` 均通过。
+- Slice B template single source：`crates/core/src/template.rs` 新增 `TemplateRegistry`，把模板列表、`article -> web_article` alias、平台路由规则和 platform->template 映射收敛到 Rust；`canonical_template_id` 和 `suggest_template_id_for_url` 不再硬编码分支。URL 匹配优先级为 exact host > host suffix > path keyword，同优先级按规则顺序取第一条，未匹配回落 `web_article`。
+- Slice B Tauri contract：`list_templates` 从 `Vec<ResearchTemplate>` 改为返回 `TemplateRegistry`，字段保持 Rust snake_case。`create_capture_task`、settings 默认模板保存和 task 校验仍走 `canonical_template_id`，旧 `article` 数据继续兼容。
+- Slice B tests：`cargo test -p reachnote-core` 通过，28 passed；新增 registry 暴露、匹配优先级和平台推荐测试。`cargo test --manifest-path src-tauri/Cargo.toml` 通过，52 passed / 1 ignored；`cargo check --manifest-path src-tauri/Cargo.toml` 通过。

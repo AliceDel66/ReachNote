@@ -1,12 +1,12 @@
 # Frontend Progress
 
-Last updated: 2026-07-01
+Last updated: 2026-07-02
 
 ## Current Snapshot
 
-状态：Done / Slice 3 template registry UI
+状态：Done / Slice B template and route single source UI
 
-旧 `src/` 前端实现已清空后，本轮重新建立 React 18 + Vite + HeroUI 依赖基线，并实现新版 UI 静态壳。当前默认进入 `队列`，导航为 `采集 / 队列 / 模板 / 设置`。队列页已从 mock 常量切到真实 Tauri commands：加载和轮询前先 `invoke("recover_interrupted_tasks")`，再 `invoke("sync_pending_analyzed_tasks")`，最后 `invoke("list_capture_tasks")`；采集页 CTA 先 `create_capture_task`，再后台触发后端完整 `run_capture_task`，分析成功后的 Notion 同步不再依赖前端追加调用。Slice 1 已把 `App.tsx` 拆成页面组件和 shared types/utils，并新增首次启动 onboarding、环境检测状态、provider 持久化和 settings 默认项管理。Slice 2 已在 Settings 接入 Agent-Reach 平台能力矩阵，在 onboarding 首次自动触发一次平台检测，在 Capture 页根据最近快照显示只读来源提示；不改变真实采集读取路由。Slice 3 已把模板从静态展示升级为系统模板选择地基：`TEMPLATES` 使用 PRD canonical IDs，模板页可设默认模板，采集页可选择模板并显示 URL 推荐模板，队列表新增模板列并按 `task.template_id` 显示中文 label。最新 UI/桌面切片优化顶部右侧搜索/设置/隐藏三个 icon button，并把“缩小”从 React 伪导航条改为 `invoke("set_compact_mode", { compact: true })` 隐藏主窗口；Tauri 启动层已创建原生 macOS status item，后台保留 Tauri 进程并提供恢复入口。
+旧 `src/` 前端实现已清空后，本轮重新建立 React 18 + Vite + HeroUI 依赖基线，并实现新版 UI 静态壳。当前默认进入 `队列`，导航为 `采集 / 队列 / 模板 / 设置`。队列页已从 mock 常量切到真实 Tauri commands；Slice A 后前端只注册 `task:updated` / `worker:error` 并把提交/重试交给 worker。Slice 1 已把 `App.tsx` 拆成页面组件和 shared types/utils，并新增首次启动 onboarding、环境检测状态、provider 持久化和 settings 默认项管理。Slice 2 已在 Settings 接入 Agent-Reach 平台能力矩阵，在 onboarding 首次自动触发一次平台检测，在 Capture 页根据最近快照显示只读来源提示。Slice 3 已把模板从静态展示升级为系统模板选择地基。Slice B 已把模板内容和 URL 路由从 TypeScript 常量迁到 backend `TemplateRegistry`：`App.tsx` 启动并行加载 `list_templates`，`CaptureView` / `TemplatesView` / `QueueView` 均消费 registry 派生的 `TemplateItem`；`src/constants.ts` 只保留 UI-only `TEMPLATE_PRESENTATION`，`src/utils.ts` 按 backend `platform_rules` 和 `platform_template_mappings` 计算来源提示、推荐模板和模板 label。
 
 ## Changed Files
 
@@ -106,3 +106,8 @@ Last updated: 2026-07-01
 - Slice A review P2 fix：`handleRetryTask` 改为 functional state update，不再闭包依赖 `tasks`；`handleRunTask` 点击“立即处理”后对 queued 行乐观显示 `reading`，等待后端 CAS/worker event 校正。
 - Slice A 桌面 QA：隔离 `ReachNote QA.app` / `com.reachnote.qa` 中，Computer Use 创建公开 `https://example.com/reachnote-slice-a-worker-smoke` 任务。队列先显示 `读取中`，随后显示 `分析中`，最终显示红色 `失败`、行内 Notion 未配置原因、`重试` 按钮；DB 同步显示 `failed/notion_unauthorized` 且 `analysis_json IS NOT NULL`。点击重试后仍由 worker 回到同一失败态。
 - Slice A 验证：`pnpm typecheck`、`pnpm build` 通过；`scripts/desktop-smoke-qa.sh --reset-data` 构建 QA app 通过，Computer Use 可绑定 QA app。
+- Slice B registry loading：`App.tsx` 启动时并行调用 `get_app_settings`、`get_environment_status`、`list_templates`，在 registry ready 后再渲染主 UI，避免空 registry 下错误推荐。默认模板从 settings 中按 backend alias canonical 化，旧 `article` 仍能回落到 `web_article`。
+- Slice B templates UI：`TemplatesView` 不再 import `TEMPLATES` 静态文本，系统模板名、描述、prompt profile、enabled 状态来自 backend；仅 icon/chips 来自 `TEMPLATE_PRESENTATION`。`CaptureView` 下拉和推荐文案使用 backend name；`QueueView` 模板列通过 `taskToQueueRow(task, templateRegistry)` 渲染。
+- Slice B route UI：`sourcePlatformKeyForUrl` 改为消费 backend `platform_rules`，TypeScript 里不再维护 `github.com` / `youtube.com` / `bilibili.com` 等域名分支；`templateForSourcePlatformKey` 改为消费 backend `platform_template_mappings`。`xueqiu` 当前只识别平台，不配置模板映射，继续按旧行为回落网页文章。
+- Slice B 验证：`pnpm typecheck`、`pnpm build` 通过；`git diff --check` 通过；`rg -n "description|promptProfile" src/constants.ts` 无输出；`rg -n "github\\.com|youtube\\.com|bilibili\\.com|xiaohongshu" src --glob '*.ts' --glob '*.tsx'` 仅剩 `sourcePlatformFallbackName` 的 `xiaohongshu: "小红书"` 展示名，不是路由分支。
+- Slice B 桌面 QA：隔离 `ReachNote QA.app` / `com.reachnote.qa` 中，模板页显示 5 个 backend 模板；设置 GitHub 为默认后重启仍持久化。Capture 页输入公开 GitHub URL 推荐 `GitHub 项目分析`，输入 YouTube URL 推荐 `视频笔记`，输入 RSS feed URL 推荐 `RSS 简报`。为避免真实 AI provider 调用，直接向 QA SQLite 插入一条 `failed` 假任务，重启后 Queue 模板列把 `video_note` 显示为 `视频笔记`。
