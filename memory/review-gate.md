@@ -4,9 +4,9 @@ Last updated: 2026-07-02
 
 ## Current Snapshot
 
-状态：In Progress / C0 CI gate codex review passed, GitHub Actions verification pending
+状态：PASS / C0 CI gate and codex review passed
 
-历史上多个队列/worker/provider/reader/Notion 切片的 Claude CLI 只读 review gate 曾 timeout 或 blocked。`Analyzed -> Notion` 自动同步 bugfix 已完成 Claude gate：无 P0/P1，1 个 P2（批量补同步遇到极低概率 DB 错误会提前退出，后续 refresh 可恢复），Gate = PASS。桌面 QA 隔离修复已完成 Claude gate：最终 Gate = PASS。Slice 2 Agent-Reach 平台能力矩阵已完成 Claude gate：无 P0/P1，Gate = PASS。Slice 3 模板注册/模板选择地基本地验证与桌面 QA 均通过，但 Claude CLI 只读 review 两次超时无输出，最终由 2026-07-02 的 Slice 1-3 单 commit 落盘。C0 CI 验收防线已按报告进入 PR：codex 只读 review fallback 对 C0 workflow diff 返回 Gate = PASS；GitHub Actions 真实 runner 与 PR body 修正仍待网络/API 稳定后确认。
+历史上多个队列/worker/provider/reader/Notion 切片的 Claude CLI 只读 review gate 曾 timeout 或 blocked。`Analyzed -> Notion` 自动同步 bugfix 已完成 Claude gate：无 P0/P1，1 个 P2（批量补同步遇到极低概率 DB 错误会提前退出，后续 refresh 可恢复），Gate = PASS。桌面 QA 隔离修复已完成 Claude gate：最终 Gate = PASS。Slice 2 Agent-Reach 平台能力矩阵已完成 Claude gate：无 P0/P1，Gate = PASS。Slice 3 模板注册/模板选择地基本地验证与桌面 QA 均通过，但 Claude CLI 只读 review 两次超时无输出，最终由 2026-07-02 的 Slice 1-3 单 commit 落盘。C0 CI 验收防线已按报告进入 PR：codex 只读 review fallback 对 C0 workflow diff 返回 Gate = PASS；GitHub Actions 真实 runner 通过，且同一 commit rerun 3 次均通过。
 
 ## Gate Rules
 
@@ -52,7 +52,7 @@ Last updated: 2026-07-02
 - Slice 1-3 已由 Yaocheng 落盘为 `b307839 落盘 Slice 1-3：settings、平台矩阵与模板地基`；本地 `git status` 进入干净状态后，Codex 从该提交创建 `codex/c0-ci-landing` 分支。
 - C0 CI 验收防线实现提交：`0a81607 新增 C0 CI 验收防线`。改动范围仅 `.github/workflows/ci.yml`，新增 macOS `pull_request` / `push main` 验证 job，包含 `pnpm/action-setup@v4`、Node 24、Rust stable/cache、`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm build`、`cargo test -p reachnote-core`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml` 和 PR/push 分支化 whitespace check；workflow 权限为 `contents: read`，未使用 `pull_request_target`。
 - 本地 C0 验证：`pnpm typecheck && pnpm build` 通过；`cargo test -p reachnote-core` 26 passed；`cargo test --manifest-path src-tauri/Cargo.toml` 41 passed / 1 ignored；`cargo check --manifest-path src-tauri/Cargo.toml` 通过；`git diff --check` 通过。
-- PR 已创建：`https://github.com/AliceDel66/ReachNote/pull/1`，head 为 `codex/c0-ci-landing`，base 为 `main`。由于远端 `main` 在创建 PR 时仍停在 `919f5f4`，该 PR 包含前置 `b307839` 和 C0 `0a81607` 两个提交；C0 自身提交不改应用代码。
+- PR 已创建：`https://github.com/AliceDel66/ReachNote/pull/1`，head 为 `codex/c0-ci-landing`，base 为 `main`。由于远端 `main` 在创建 PR 时仍停在 `919f5f4`，该 PR 包含前置 `b307839` 和 C0 `0a81607` 两个提交；C0 自身提交不改应用代码。首次 PR body 因 shell 反引号被污染，已通过 GitHub REST PATCH 修正。
 - Review attempt 18：按 C0 报告要求执行 codex 只读 review fallback，命令为 `codex exec -s read-only "<C0 workflow diff review prompt>"`，审查范围限定到 `0a81607` 的 `.github/workflows/ci.yml`。结果：Findings 无 P0/P1/P2，Gate = PASS。残余风险：真实 GitHub Actions runner 上仍需确认 `pull_request` 场景下 `origin/${{ github.base_ref }}...HEAD` 可稳定运行；`fetch-depth: 0` 已作为正确前置配置。
-- PR 元数据风险：首次 `gh pr create` body 中 Markdown 反引号被 zsh 命令替换污染，PR 页面正文当前包含本地命令输出。随后两次 `gh pr edit` 和一次 REST `gh api ... PATCH` 均因 GitHub API TLS handshake timeout/EOF 失败，尚未完成 body 修正；代码分支和 PR 本身已存在，后续需在 GitHub API 或浏览器登录态稳定后清理 PR body。
 - CI run `28573058115` / job `84715065717` 首次失败在 `Check whitespace`，原因是前置 PRD `plans/prds/20260701-1447-reachnote-next-phase-platform-template-destinations-onboarding-shortcuts.prd.md` 第 3-6 行 Markdown 硬换行尾随空格。已提交 `b513574 修复 PRD 空白检查问题`，删除 4 行尾随空格，并本地复跑 `git diff --check origin/main...HEAD` 通过。
+- CI run `28573828152` 在 commit `ccd0a75` 上通过：初始 job `84717527015` success；同一 commit 三次 rerun 均通过，job 分别为 `84718456350`、`84719230579`、`84719818249`。C0 的 GitHub Actions runner 验收与 flake 检查均完成。
